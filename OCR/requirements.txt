@@ -1,0 +1,3 @@
+surya-ocr
+pypdfium2
+pillow
