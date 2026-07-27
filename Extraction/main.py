@@ -64,6 +64,9 @@ from Extraction.llm_extraction import (
 # ── Utils ───────────────────────────────────────────────────────────────────
 from Extraction.utils.helpers import dedup_assets, to_none, clean_rel_type
 
+# ── Validation ──────────────────────────────────────────────────────────────
+from Extraction.validate_llm import validate_entities, validate_case_llm
+
 import requests
 from tenacity import retry, wait_exponential, stop_after_attempt
 
@@ -189,6 +192,166 @@ def process_case(json_path: str, pdf_paths: list[str]) -> dict:
     result['assets']            = len(raw_assets)
     result['missing_advocates'] = len(missing_advocates)
     result['judges_found']      = len(judges_data)
+
+    # ── Rule-based validation of LLM-extracted entities ──────────────────
+    judges_data, judges_dropped = validate_entities('judge', judges_data, result['cnr'])
+    raw_assets, assets_dropped  = validate_entities('asset', raw_assets, result['cnr'])
+    validation_dropped = judges_dropped + assets_dropped
+    missing_log.extend(
+        f"[validation] {d['entity_type']}.{d['field']}={d['value']!r} failed rule check"
+        for d in validation_dropped
+    )
+
+    # ── LLM (Ollama) whole-case semantic validation ───────────────────────
+    # Covers every free-text field with real semantic risk: persons.name/
+    # address/role, judges.name/designation, lawyers.name (missing_advocates),
+    # organizations.name/address (new_parties of type organization),
+    # hearings.purpose/judge_designation/nature_of_disposal, and the
+    # case-level district/state pair.
+    # `address`/`role` map to PersonModel.address_text/role;
+    # `judge_designation` on hearings maps to HearingModel.judge_designation
+    # (a second, independent source of designation text from persons/judges).
+    #
+    # PRIMARY_FIELDS_BY_ENTITY: for these entity types, a flagged or missing
+    # `name` means the extracted value cannot be trusted to refer to a real
+    # entity at all — so the WHOLE entity is dropped rather than just the
+    # field being nulled. Every other checked field is secondary: only that
+    # field gets nulled, the entity itself survives. `case` has no primary
+    # field here (district/state are supplementary, the Case itself is
+    # never dropped by this check).
+    PRIMARY_FIELDS_BY_ENTITY = {
+        'persons'      : {'name'},
+        'judges'       : {'name'},
+        'lawyers'      : {'name'},
+        'organizations': {'name'},
+    }
+
+    lawyer_entries = []
+    for adv in missing_advocates:
+        if isinstance(adv, str):
+            lawyer_entries.append({'name': to_none(adv)})
+        else:
+            lawyer_entries.append({'name': to_none(adv.get('name'))})
+
+    organization_entries = []
+    for np in new_parties:
+        if isinstance(np, str):
+            continue
+        if (np.get('type') or '').lower() != 'organization':
+            continue
+        organization_entries.append({
+            'name'   : to_none(np.get('name')),
+            'address': to_none(np.get('address')),
+        })
+
+    case_entities_for_llm = {
+        'persons': [
+            {'name': p.name, 'address': p.address_text, 'role': p.role}
+            for p in case.persons
+        ],
+        'judges': [
+            {'name': j.get('name'), 'designation': j.get('designation')}
+            for j in judges_data
+        ],
+        'lawyers': lawyer_entries,
+        'organizations': organization_entries,
+        'hearings': [
+            {
+                'purpose': h.purpose,
+                'judge_designation': h.judge_designation,
+                'nature_of_disposal': h.diary_note.nature_of_disposal,
+            }
+            for h in case.hearings
+        ],
+        'case': [
+            {'district': case.district, 'state': case.state},
+        ],
+    }
+    cleaned_case_entities, validation_dropped_llm = validate_case_llm(
+        case_entities_for_llm, result['cnr'],
+    )
+
+    # Fields flagged by the LLM as wrong-content for a PRIMARY field (see
+    # PRIMARY_FIELDS_BY_ENTITY above) mark their whole entity for removal;
+    # everything else is a secondary field and is simply nulled from the
+    # cleaned copy. persons.role has no valid "unknown" state either, so
+    # (like name) a flagged role is left as originally extracted.
+    dropped_by_primary: dict[str, set[int]] = {
+        etype: set() for etype in PRIMARY_FIELDS_BY_ENTITY
+    }
+    for d in validation_dropped_llm:
+        primary_fields = PRIMARY_FIELDS_BY_ENTITY.get(d['entity_type'])
+        if primary_fields and d['field'] in primary_fields:
+            dropped_by_primary[d['entity_type']].add(d['index'])
+
+    for p, cleaned in zip(case.persons, cleaned_case_entities['persons']):
+        p.address_text = cleaned['address']
+    for j, cleaned in zip(judges_data, cleaned_case_entities['judges']):
+        j['designation'] = cleaned['designation']
+    for h, cleaned in zip(case.hearings, cleaned_case_entities['hearings']):
+        h.purpose = cleaned['purpose']
+        h.judge_designation = cleaned['judge_designation']
+        h.diary_note.nature_of_disposal = cleaned['nature_of_disposal']
+
+    # ── Drop whole entities whose primary field (name) was missing/flagged ──
+    persons_dropped_idx = {
+        i for i, p in enumerate(case.persons) if to_none(p.name) is None
+    } | dropped_by_primary['persons']
+    if persons_dropped_idx:
+        case.persons = [
+            p for i, p in enumerate(case.persons) if i not in persons_dropped_idx
+        ]
+
+    judges_dropped_idx = {
+        i for i, j in enumerate(judges_data) if to_none(j.get('name')) is None
+    } | dropped_by_primary['judges']
+    if judges_dropped_idx:
+        judges_data = [
+            j for i, j in enumerate(judges_data) if i not in judges_dropped_idx
+        ]
+
+    lawyers_dropped_idx = {
+        i for i, l in enumerate(lawyer_entries) if to_none(l.get('name')) is None
+    } | dropped_by_primary['lawyers']
+    if lawyers_dropped_idx:
+        missing_advocates = [
+            adv for i, adv in enumerate(missing_advocates)
+            if i not in lawyers_dropped_idx
+        ]
+
+    orgs_dropped_idx = {
+        i for i, o in enumerate(organization_entries) if to_none(o.get('name')) is None
+    } | dropped_by_primary['organizations']
+    if orgs_dropped_idx:
+        org_indices_in_new_parties = [
+            i for i, np in enumerate(new_parties)
+            if not isinstance(np, str) and (np.get('type') or '').lower() == 'organization'
+        ]
+        drop_np_idx = {org_indices_in_new_parties[i] for i in orgs_dropped_idx}
+        new_parties = [
+            np for i, np in enumerate(new_parties) if i not in drop_np_idx
+        ]
+
+    result['dropped_entities'] = {
+        'persons'      : len(persons_dropped_idx),
+        'judges'       : len(judges_dropped_idx),
+        'lawyers'      : len(lawyers_dropped_idx),
+        'organizations': len(orgs_dropped_idx),
+    }
+    missing_log.extend(
+        f"[validation-llm] dropped {etype}[{i}] — missing/invalid primary field 'name'"
+        for etype, idxs in (
+            ('persons', persons_dropped_idx), ('judges', judges_dropped_idx),
+            ('lawyers', lawyers_dropped_idx), ('organizations', orgs_dropped_idx),
+        )
+        for i in idxs
+    )
+
+    missing_log.extend(
+        f"[validation-llm] {d['entity_type']}.{d['field']}={d['value']!r} — {d['reason']}"
+        for d in validation_dropped_llm
+    )
+    result['validation_dropped'] = validation_dropped + validation_dropped_llm
 
     for asset in raw_assets:
         asset['_source_storage_id'] = next(iter(pdf_texts), None)

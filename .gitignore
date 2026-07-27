@@ -1,4 +1,5 @@
 .venv/
+venv/
 .env
 .legalai/
 manifest.csv
@@ -13,3 +14,4 @@ detailed_gap_analysis.md
 
 # Database storage
 qdrant_storage/
+Extraction/venv

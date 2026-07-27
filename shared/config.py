@@ -47,6 +47,10 @@ NVIDIA_HEADERS   = {
     "Content-Type" : "application/json",
 }
 
+# ── Ollama / local validation LLM ───────────────────────────────────────────
+OLLAMA_URL       = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+VALIDATION_MODEL = os.environ.get("VALIDATION_MODEL", "reaperdoesntrun/Qwen3-0.6B-Distilled")
+
 # ── Domain constants ───────────────────────────────────────────────────────
 DISTRICT_OVERRIDES = {
     "mumbai cmm courts"          : "Mumbai",
