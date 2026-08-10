@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/lending_poc"
     LOG_LEVEL: str = "INFO"
+    ENCRYPTION_KEY: str = ""
 
 
 settings = Settings()
