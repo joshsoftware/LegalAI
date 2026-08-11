@@ -22,6 +22,7 @@ def upgrade() -> None:
     op.create_table(
         'intermediate_field_mapping',
         sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
+        sa.Column('case_id', sa.Integer(), nullable=False),
         sa.Column('field_mapper_output', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column('processing_date', sa.DateTime(), nullable=True),
         sa.Column('validated', sa.Boolean(), nullable=True),
