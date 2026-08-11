@@ -1,0 +1,100 @@
+{
+  "_test_design_notes": {
+    "purpose": "Clean happy-path case: every identity document agrees with the Golden Record, every salary slip has a matching bank credit with a clearly-passing employer name, no mandatory fields missing. Verified behavior: every single check (NAME, ADDRESS, AADHAAR, PAN, DOB, EMPLOYER, SALARY_DATE, SALARY_CREDIT_COUNT) scores exactly 100.0.",
+    "expected_overall_decision": "PASS at 100.0 overall score, reasons=['score_meets_pass_threshold'] -- re-verify with: python scripts/run_demo.py scripts/sample_case_pass.json"
+  },
+  "applicant_ref": "APP-2026-00200",
+  "documents": [
+    {
+      "doc_type": "AADHAAR",
+      "extracted_fields": {
+        "name": "Rohit Kumar Sharma",
+        "address": "Flat 12, Sunrise Apartments, Andheri East, Mumbai, Maharashtra 400069",
+        "aadhaar_number": "1234 5678 9123",
+        "date_of_birth": "1990-06-21"
+      },
+      "source_file_ref": "s3://kyc-docs/APP-2026-00200/aadhaar_front.pdf"
+    },
+    {
+      "doc_type": "PAN",
+      "extracted_fields": {
+        "name": "Rohit Kumar Sharma",
+        "pan_number": "PQRSX9876Z"
+      },
+      "source_file_ref": "s3://kyc-docs/APP-2026-00200/pan_card.pdf"
+    },
+    {
+      "doc_type": "ADDRESS_PROOF",
+      "extracted_fields": {
+        "address": "Flat 12, Sunrise Apartments, Andheri East, Mumbai, Maharashtra 400069"
+      },
+      "source_file_ref": "s3://kyc-docs/APP-2026-00200/address_proof.pdf"
+    },
+    {
+      "doc_type": "SALARY_SLIP",
+      "salary_slips": [
+        {
+          "extracted_fields": {
+            "name": "Rohit Kumar Sharma",
+            "employer_name": "Orion Software Pvt Ltd",
+            "net_salary": 90000,
+            "salary_month": "2026-03"
+          },
+          "source_file_ref": "s3://kyc-docs/APP-2026-00200/salary_slip_march.pdf"
+        },
+        {
+          "extracted_fields": {
+            "name": "Rohit Kumar Sharma",
+            "employer_name": "Orion Software Pvt Ltd",
+            "net_salary": 90000,
+            "salary_month": "2026-04"
+          },
+          "source_file_ref": "s3://kyc-docs/APP-2026-00200/salary_slip_april.pdf"
+        },
+        {
+          "extracted_fields": {
+            "name": "Rohit Kumar Sharma",
+            "employer_name": "Orion Software Pvt Ltd",
+            "net_salary": 92000,
+            "salary_month": "2026-05"
+          },
+          "source_file_ref": "s3://kyc-docs/APP-2026-00200/salary_slip_may.pdf"
+        }
+      ]
+    },
+    {
+      "doc_type": "BANK_STATEMENT",
+      "extracted_fields": {
+        "name": "Rohit Kumar Sharma",
+        "transactions": [
+          {
+            "narration": "ORION SOFTWARE PVT LTD SALARY MAR",
+            "amount": 90000,
+            "date": "2026-04-01"
+          },
+          {
+            "narration": "HOUSE RENT EMI DEBIT",
+            "amount": -20000,
+            "date": "2026-04-03"
+          },
+          {
+            "narration": "ORION SOFTWARE PVT LTD SALARY APR",
+            "amount": 90000,
+            "date": "2026-05-01"
+          },
+          {
+            "narration": "GROCERY STORE PAYMENT",
+            "amount": -1500,
+            "date": "2026-05-06"
+          },
+          {
+            "narration": "ORION SOFTWARE PVT LTD SALARY MAY",
+            "amount": 92000,
+            "date": "2026-06-01"
+          }
+        ]
+      },
+      "source_file_ref": "s3://kyc-docs/APP-2026-00200/bank_statement_mar_to_jun.pdf"
+    }
+  ]
+}

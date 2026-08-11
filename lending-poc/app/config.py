@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "lending-poc"
     APP_VERSION: str = "0.1.0"
     DEBUG: bool = False
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/lending_poc"
+    DATABASE_URL: str
     LOG_LEVEL: str = "INFO"
 
 

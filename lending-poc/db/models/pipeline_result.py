@@ -1,9 +1,9 @@
 """DB model for a pipeline run.
 
-Named `PipelineResult` to match the ERD/table name. This collides with the
-in-memory `app.services.dto.PipelineResult` dataclass — import one or both
-qualified (`from app.models import pipeline_result as pipeline_result_model`)
-in any module that needs both.
+Named `PipelineResult` to match the ERD/table name. If an in-memory DTO with
+the same name is introduced elsewhere, import one or both qualified
+(`from db.models import pipeline_result as pipeline_result_model`) in any
+module that needs both.
 """
 
 import uuid

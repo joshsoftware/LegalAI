@@ -1,0 +1,95 @@
+{
+  "_test_design_notes": {
+    "purpose": "Borderline case: no mandatory field is missing (so the hard-fail short-circuit never triggers), but one check fails so the weighted score settles inside the NEEDS_REVIEW band (DECISION_FAIL_THRESHOLD 60.0 <= score < DECISION_PASS_THRESHOLD 90.0). Verified behavior (actually run through the pipeline): all identity checks (NAME, ADDRESS, AADHAAR, PAN, DOB) PASS -- ADDRESS_PROOF wording differs from Aadhaar (different locality: Kothrud vs Warje) but still clears the 0.55 embedding-similarity threshold at ~56.8, just above the line. The April slip's employer_name is shortened to 'Crestline' (missing 'Pvt Ltd') vs the bank narration 'CRESTLINE SALARY APR' -- this still scores EMPLOYER 100.0 via token_set_ratio (all of Crestline's tokens are a subset of the narration's), so shortening the name alone did NOT create a borderline EMPLOYER score as originally intended; left as-is since it demonstrates the matcher tolerates missing trailing suffix tokens when every present token matches. The actual driver of NEEDS_REVIEW is the May slip: no bank transaction anywhere near its window matches -> SALARY_DATE FAILS (0.0, reason=no_matching_credit_in_window), EMPLOYER FAILS as a consequence (nothing to verify against), and SALARY_CREDIT_COUNT drops to 2/3 (66.67).",
+    "expected_overall_decision": "NEEDS_REVIEW at ~86.17 overall score -- re-verify with: python scripts/run_demo.py scripts/sample_case_needs_review.json (or the inline pipeline invocation used to design this fixture)"
+  },
+  "applicant_ref": "APP-2026-00202",
+  "documents": [
+    {
+      "doc_type": "AADHAAR",
+      "extracted_fields": {
+        "name": "Anjali Ramesh Patil",
+        "address": "Flat 7, Silver Oak Society, Kothrud, Pune, Maharashtra 411038",
+        "aadhaar_number": "5566 7788 9900",
+        "date_of_birth": "1992-11-02"
+      },
+      "source_file_ref": "s3://kyc-docs/APP-2026-00202/aadhaar_front.pdf"
+    },
+    {
+      "doc_type": "PAN",
+      "extracted_fields": {
+        "name": "Anjali Ramesh Patil",
+        "pan_number": "ARPAT2025K"
+      },
+      "source_file_ref": "s3://kyc-docs/APP-2026-00202/pan_card.pdf"
+    },
+    {
+      "doc_type": "ADDRESS_PROOF",
+      "extracted_fields": {
+        "address": "Building B, Riverside Enclave, Warje, Pune, Maharashtra 411058"
+      },
+      "source_file_ref": "s3://kyc-docs/APP-2026-00202/address_proof.pdf"
+    }, 
+    {
+      "doc_type": "SALARY_SLIP",
+      "salary_slips": [
+        {
+          "extracted_fields": {
+            "name": "Anjali Ramesh Patil",
+            "employer_name": "Crestline Systems Pvt Ltd",
+            "net_salary": 68000,
+            "salary_month": "2026-03"
+          },
+          "source_file_ref": "s3://kyc-docs/APP-2026-00202/salary_slip_march.pdf"
+        },
+        {
+          "extracted_fields": {
+            "name": "Anjali Ramesh Patil",
+            "employer_name": "Crestline Systems Pvt Ltd",
+            "net_salary": 68000,
+            "salary_month": "2026-04"
+          },
+          "source_file_ref": "s3://kyc-docs/APP-2026-00202/salary_slip_april.pdf"
+        },
+        {
+          "extracted_fields": {
+            "name": "Anjali Ramesh Patil",
+            "employer_name": "Crestline Systems Pvt Ltd",
+            "net_salary": 68000,
+            "salary_month": "2026-05"
+          },
+          "source_file_ref": "s3://kyc-docs/APP-2026-00202/salary_slip_may.pdf"
+        }
+      ]
+    },
+    {
+      "doc_type": "BANK_STATEMENT",
+      "extracted_fields": {
+        "name": "Anjali Ramesh Patil",
+        "transactions": [
+          {
+            "narration": "Crestline Systems Pvt Ltd",
+            "amount": 68000,
+            "date": "2026-03-03"
+          },
+          {
+            "narration": "Crestline Systems",
+            "amount": 68000,
+            "date": "2026-04-04"
+          },
+          {
+            "narration": "Crestline Systems Pvt Ltd",
+            "amount": 68000,
+            "date": "2026-05-05"
+          },
+          {
+            "narration": "ONLINE SHOPPING PAYMENT",
+            "amount": -3200,
+            "date": "2026-05-10"
+          }
+        ]
+      },
+      "source_file_ref": "s3://kyc-docs/APP-2026-00202/bank_statement_mar_to_may.pdf"
+    }
+  ]
+}

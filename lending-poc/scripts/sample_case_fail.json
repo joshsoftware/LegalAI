@@ -1,0 +1,81 @@
+{
+  "_test_design_notes": {
+    "purpose": "Clean fail-path case. Two independent failure triggers stacked: (1) Aadhaar date_of_birth is missing -> golden_record.date_of_birth stays None -> MANDATORY_FIELD_MISSING:DOB hard-fails the case in decision_engine regardless of score; (2) PAN name doesn't match the applicant (different person, NAME score 35.29 doc=PAN), Aadhaar address vs address proof is a different city (ADDRESS score 53.50, below the 0.55 threshold), and neither salary slip has a matching bank credit (both SALARY_DATE and EMPLOYER FAIL at 0.0, SALARY_CREDIT_COUNT 0.0) -- so even ignoring the mandatory-field short-circuit, the underlying score (50.73) is already under DECISION_FAIL_THRESHOLD (60.0).",
+    "expected_overall_decision": "FAIL at 50.73 overall score, reasons=['MANDATORY_FIELD_MISSING:DOB'] -- re-verify with: python scripts/run_demo.py scripts/sample_case_fail.json"
+  },
+  "applicant_ref": "APP-2026-00201",
+  "documents": [
+    {
+      "doc_type": "AADHAAR",
+      "extracted_fields": {
+        "name": "Priya Deshmukh",
+        "address": "House 8, Lakeview Colony, Nagpur, Maharashtra 440001",
+        "aadhaar_number": "9988 7766 5544",
+        "date_of_birth": null
+      },
+      "source_file_ref": "s3://kyc-docs/APP-2026-00201/aadhaar_front.pdf"
+    },
+    {
+      "doc_type": "PAN",
+      "extracted_fields": {
+        "name": "Priya Deshmukh",
+        "pan_number": "ZZTOP1111Q"
+      },
+      "source_file_ref": "s3://kyc-docs/APP-2026-00201/pan_card.pdf"
+    },
+    {
+      "doc_type": "ADDRESS_PROOF",
+      "extracted_fields": {
+        "address": "House 10, Lakeview Colony,Iran , Iran"
+      },
+      "source_file_ref": "s3://kyc-docs/APP-2026-00201/address_proof.pdf"
+    },
+    {
+      "doc_type": "SALARY_SLIP",
+      "salary_slips": [
+        {
+          "extracted_fields": {
+            "name": "Priya Deshmukh",
+            "employer_name": "Falcon Industries Pvt Ltd",
+            "net_salary": 60000,
+            "salary_month": "2026-03"
+          },
+          "source_file_ref": "s3://kyc-docs/APP-2026-00201/salary_slip_march.pdf"
+        },
+        {
+          "extracted_fields": {
+            "name": "Priya Deshmukh",
+            "employer_name": "Falcon Industries Pvt Ltd",
+            "net_salary": 60000,
+            "salary_month": "2026-04"
+          },
+          "source_file_ref": "s3://kyc-docs/APP-2026-00201/salary_slip_april.pdf"
+        }
+      ]
+    },
+    {
+      "doc_type": "BANK_STATEMENT",
+      "extracted_fields": {
+        "name": "Priya Deshmukh",
+        "transactions": [
+          {
+            "narration": "Falcon Industries Pvt Ltd",
+            "amount": 60000,
+            "date": "2026-12-12"
+          },
+          {
+            "narration": "ELECTRICITY BILL PAYMENT",
+            "amount": -2200,
+            "date": "2026-04-10"
+          },
+          {
+            "narration": "UNKNOWN CREDIT NEFT",
+            "amount": 12000,
+            "date": "2026-04-15"
+          }
+        ]
+      },
+      "source_file_ref": "s3://kyc-docs/APP-2026-00201/bank_statement_mar_to_apr.pdf"
+    }
+  ]
+}
