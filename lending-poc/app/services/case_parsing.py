@@ -1,7 +1,6 @@
 """Parses the raw request JSON shape (see docs/Workflow.md) into CaseInput.
 
-Shared by the POST /cases endpoint and scripts/run_demo.py so both use
-identical parsing rules.
+Used by the POST /cases endpoint.
 """
 
 from datetime import date, datetime
@@ -59,7 +58,7 @@ def parse_case(payload: dict) -> CaseInput:
                 address=_get(fields, "address"),
                 aadhaar_number=_get(fields, "aadhaar_number"),
                 date_of_birth=_parse_date(_get(fields, "date_of_birth")),
-                source_file_ref=doc["source_file_ref"],
+                source_file_ref=doc.get("source_file_ref"),
             )
 
         elif doc_type == "PAN":
@@ -67,25 +66,28 @@ def parse_case(payload: dict) -> CaseInput:
             case.pan = PanDoc(
                 name=_get(fields, "name"),
                 pan_number=_get(fields, "pan_number"),
-                source_file_ref=doc["source_file_ref"],
+                source_file_ref=doc.get("source_file_ref"),
             )
 
         elif doc_type == "ADDRESS_PROOF":
             fields = doc["extracted_fields"]
             case.address_proof = AddressProofDoc(
                 address=_get(fields, "address"),
-                source_file_ref=doc["source_file_ref"],
+                source_file_ref=doc.get("source_file_ref"),
             )
 
         elif doc_type == "SALARY_SLIP":
-            for i, slip in enumerate(doc["salary_slips"]):
+            slips = doc.get("salary_slips") or []
+            if not slips:
+                raise ValueError("SALARY_SLIP document must include at least one entry in salary_slips")
+            for i, slip in enumerate(slips):
                 fields = slip["extracted_fields"]
                 case.salary_slips.append(
                     SalarySlipDoc(
                         employer_name=_get(fields, "employer_name"),
                         net_salary=_parse_float(_get(fields, "net_salary")),
                         salary_month=_parse_month(_get(fields, "salary_month")),
-                        source_file_ref=slip["source_file_ref"],
+                        source_file_ref=slip.get("source_file_ref"),
                         doc_id=f"SALARY_SLIP-{i}",
                         name=_get(fields, "name"),
                     )
@@ -103,7 +105,7 @@ def parse_case(payload: dict) -> CaseInput:
             ]
             case.bank_statement = BankStatementDoc(
                 transactions=transactions,
-                source_file_ref=doc["source_file_ref"],
+                source_file_ref=doc.get("source_file_ref"),
                 name=_get(fields, "name"),
             )
 

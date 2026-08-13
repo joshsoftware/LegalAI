@@ -9,11 +9,16 @@ from typing import Any
 from pydantic import BaseModel
 
 
+class SalarySlipIn(BaseModel):
+    extracted_fields: dict[str, Any]
+    source_file_ref: str | None = None
+
+
 class DocumentIn(BaseModel):
     doc_type: str
-    extracted_fields: dict[str, Any] | None = None
+    extracted_fields: dict[str, Any]
     source_file_ref: str | None = None
-    salary_slips: list[dict[str, Any]] | None = None  # only present when doc_type == SALARY_SLIP
+    salary_slips: list[SalarySlipIn] | None = None  # only present when doc_type == SALARY_SLIP
 
 
 class CaseCreateRequest(BaseModel):

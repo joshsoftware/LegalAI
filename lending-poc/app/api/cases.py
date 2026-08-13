@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -15,7 +15,10 @@ router = APIRouter(tags=["cases"])
 async def create_case(
     request: CaseCreateRequest, db: AsyncSession = Depends(get_db)
 ) -> CaseCreateResponse:
-    case_input = parse_case(request.model_dump())
+    try:
+        case_input = parse_case(request.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     pipeline_result = run_pipeline(case_input)
     case = await save_pipeline_result(db, case_input, pipeline_result)
 

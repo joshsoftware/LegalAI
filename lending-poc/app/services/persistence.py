@@ -73,8 +73,8 @@ def _document_rows(case: CaseInput) -> list[tuple[str, Document]]:
                 doc_type=DocType.SALARY_SLIP,
                 source_file_ref=slip.source_file_ref,
                 extracted_fields={
-                    "employee_name": slip.name,
-                    "employer": slip.employer_name,
+                    "name": slip.name,
+                    "employer_name": slip.employer_name,
                     "net_salary": slip.net_salary,
                     "salary_month": slip.salary_month.isoformat() if slip.salary_month else None,
                 },

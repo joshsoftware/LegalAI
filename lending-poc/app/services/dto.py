@@ -40,37 +40,37 @@ class Decision(str, Enum):
 
 @dataclass
 class AadhaarDoc:
-    source_file_ref: str
     name: str | None = None
     address: str | None = None
     aadhaar_number: str | None = None
     date_of_birth: date | None = None
+    source_file_ref: str | None = None
     doc_id: str = "AADHAAR"
 
 
 @dataclass
 class PanDoc:
-    source_file_ref: str
     name: str | None = None
     pan_number: str | None = None
+    source_file_ref: str | None = None
     doc_id: str = "PAN"
 
 
 @dataclass
 class AddressProofDoc:
-    source_file_ref: str
     address: str | None = None
+    source_file_ref: str | None = None
     doc_id: str = "ADDRESS_PROOF"
 
 
 @dataclass
 class SalarySlipDoc:
-    source_file_ref: str
     doc_id: str
     employer_name: str | None = None
     net_salary: float | None = None
     salary_month: date | None = None  # first-of-month
     name: str | None = None
+    source_file_ref: str | None = None
 
 
 @dataclass
@@ -83,9 +83,9 @@ class BankTransaction:
 @dataclass
 class BankStatementDoc:
     transactions: list[BankTransaction]
-    source_file_ref: str
     doc_id: str = "BANK_STATEMENT"
     name: str | None = None
+    source_file_ref: str | None = None
 
 
 @dataclass
