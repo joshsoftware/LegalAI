@@ -11,14 +11,14 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.case import Case, CaseStatus
-from app.models.document import Document
-from app.models.golden_record import GoldenRecord as GoldenRecordModel
-from app.models.pipeline_result import PipelineResult as PipelineResultModel
-from app.models.validation_result import ValidationResult as ValidationResultModel
 from app.services.dto import CaseInput, Decision, DocType
 from app.services.dto import PipelineResult as PipelineResultDTO
 from app.utils.json_safe import json_safe
+from db.models.case import Case, CaseStatus
+from db.models.document import Document
+from db.models.golden_record import GoldenRecord as GoldenRecordModel
+from db.models.pipeline_result import PipelineResult as PipelineResultModel
+from db.models.validation_result import ValidationResult as ValidationResultModel
 
 _DECISION_TO_CASE_STATUS = {
     Decision.PASS: CaseStatus.PASS,
