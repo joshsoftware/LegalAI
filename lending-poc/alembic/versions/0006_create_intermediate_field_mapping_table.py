@@ -1,6 +1,6 @@
 """create intermediate_field_mapping table
 
-Revision ID: 1a2b3c4d5e6f
+Revision ID: 0006_create_intermediate_field_mapping_table
 Revises: 
 Create Date: 2026-08-11 15:05:00.000000
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '1a2b3c4d5e6f'
+revision: str = '0006_create_intermediate_field_mapping_table'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
