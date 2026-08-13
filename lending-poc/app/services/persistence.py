@@ -7,8 +7,6 @@ ValidationResult.document_id (also a doc_id string) can be resolved to the
 real foreign key.
 """
 
-import dataclasses
-import datetime
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,29 +18,13 @@ from app.models.pipeline_result import PipelineResult as PipelineResultModel
 from app.models.validation_result import ValidationResult as ValidationResultModel
 from app.services.dto import CaseInput, Decision, DocType
 from app.services.dto import PipelineResult as PipelineResultDTO
+from app.utils.json_safe import json_safe
 
 _DECISION_TO_CASE_STATUS = {
     Decision.PASS: CaseStatus.PASS,
     Decision.FAIL: CaseStatus.FAIL,
     Decision.NEEDS_REVIEW: CaseStatus.NEEDS_REVIEW,
 }
-
-
-def _json_safe(value):
-    """Recursively converts dataclasses/dates/tuples in evidence dicts into
-    plain JSON-serializable values, since business_validation/scoring build
-    evidence out of BankTransaction dataclasses and date objects for
-    in-memory use.
-    """
-    if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return {k: _json_safe(v) for k, v in dataclasses.asdict(value).items()}
-    if isinstance(value, (datetime.date, datetime.datetime)):
-        return value.isoformat()
-    if isinstance(value, dict):
-        return {k: _json_safe(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_safe(v) for v in value]
-    return value
 
 
 def _document_rows(case: CaseInput) -> list[tuple[str, Document]]:
@@ -106,7 +88,7 @@ def _document_rows(case: CaseInput) -> list[tuple[str, Document]]:
                 doc_type=DocType.BANK_STATEMENT,
                 source_file_ref=case.bank_statement.source_file_ref,
                 extracted_fields={
-                    "account_holder": case.bank_statement.name,
+                    "name": case.bank_statement.name,
                     "transactions": [
                         {
                             "narration": txn.narration,
@@ -166,7 +148,7 @@ async def save_pipeline_result(
                 check_type=result.check_type,
                 passed=result.passed,
                 score=result.score,
-                evidence=_json_safe(result.evidence) if result.evidence else None,
+                evidence=json_safe(result.evidence) if result.evidence else None,
             )
         )
 

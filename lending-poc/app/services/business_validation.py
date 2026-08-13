@@ -111,6 +111,15 @@ def _validate_salary_slip(
             failure_reason="missing_salary_month",
         )
 
+    if slip.net_salary is None:
+        return ValidationResult(
+            check_type=CheckType.SALARY_DATE,
+            passed=False,
+            score=0.0,
+            document_id=slip.doc_id,
+            failure_reason="missing_net_salary",
+        )
+
     window = _month_window(slip.salary_month)
     candidates = [
         txn

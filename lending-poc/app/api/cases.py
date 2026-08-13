@@ -6,6 +6,7 @@ from app.schemas.case import CaseCreateRequest, CaseCreateResponse, ValidationRe
 from app.services.case_parsing import parse_case
 from app.services.persistence import save_pipeline_result
 from app.services.pipeline import run_pipeline
+from app.utils.json_safe import json_safe
 
 router = APIRouter(tags=["cases"])
 
@@ -30,7 +31,7 @@ async def create_case(
                 passed=r.passed,
                 score=r.score,
                 document_id=r.document_id,
-                evidence=r.evidence,
+                evidence=json_safe(r.evidence) if r.evidence else None,
             )
             for r in pipeline_result.validation_results
         ],
