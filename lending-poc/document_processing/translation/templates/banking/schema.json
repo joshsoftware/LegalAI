@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Marathi Banking and Identity Document Translation Knowledge Base Entry",
+  "description": "One retrievable unit of banking/identity knowledge for semantic translation of Marathi financial documents (bank statements, salary slips, cost sheets, Aadhaar, PAN) into English.",
+  "type": "object",
+  "required": ["id", "domain", "category", "marathi", "transliteration", "semantic_english", "definition"],
+  "properties": {
+    "id": { "type": "string", "description": "Stable unique identifier e.g. bk_0001." },
+    "domain": { "type": "string", "enum": ["banking"] },
+    "category": {
+      "type": "string",
+      "enum": ["bank_statement", "salary_slip", "cost_sheet", "identity_document", "account_type", "transaction_type", "financial_term", "institution", "regulatory"]
+    },
+    "marathi": { "type": "string" },
+    "transliteration": { "type": "string" },
+    "semantic_english": { "type": "string" },
+    "literal_gloss": { "type": "string" },
+    "definition": { "type": "string" },
+    "usage_example_mr": { "type": "string" },
+    "usage_example_en": { "type": "string" },
+    "common_mistranslation": { "type": "string" },
+    "register": { "type": "string", "enum": ["formal_banking", "regulatory", "informal"] },
+    "cross_refs": { "type": "array", "items": { "type": "string" } },
+    "source": { "type": "string" },
+    "confidence": { "type": "string", "enum": ["verified_official_source", "standard_usage", "needs_sme_review"] }
+  }
+}

@@ -1,0 +1,7 @@
+# Translation service dependencies
+ollama==0.4.7
+
+# FastAPI and server
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.20
