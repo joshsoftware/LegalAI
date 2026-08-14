@@ -1,0 +1,136 @@
+{
+  "_test_design_notes": {
+    "purpose": "Realistic mixed-signal case for one applicant, NOT a clean happy-path. Exercises pass, fail, and boundary conditions across identity and business validation in a single run. These notes describe VERIFIED behavior (actually run through the pipeline), not assumptions -- update them if the matching logic changes.",
+    "planted_conditions": {
+      "AADHAAR_name": "Sneha Sunil Lokhande (full 3-token name, becomes golden name source) -> PASS",
+      "PAN_name": "Sneha Lokhande (2 tokens, shorter than Aadhaar -> Aadhaar stays golden per fuller-name rule) -> PASS",
+      "ADDRESS_PROOF": "worded differently (Apartment vs Flat, MH vs Maharashtra) -> PASS via embedding similarity (~77, above the 55 threshold), not exact match",
+      "BANK_STATEMENT_name": "Lokhande S. S. (surname-first + initials) -> PASS, tests initials-expansion with reordering",
+      "MARCH_slip": "clean month, ABC Technologies, exact amount -> SALARY_DATE PASS (86.0), EMPLOYER PASS (80.0, right at the threshold -- 4-word company name vs narration missing 'Pvt Ltd' keeps token_set_ratio near the boundary, not a clean 100)",
+      "APRIL_slip": "legitimate employer switch mid-history (ABC Technologies -> Nimbus Retail Pvt Ltd), bank narration reflects the new employer correctly -> SALARY_DATE PASS (83.5), but EMPLOYER actually FAILS (76.47, just under the 80 threshold): 'Nimbus Retail' is shorter than 'ABC Technologies', so the missing 'Pvt Ltd' tokens cost proportionally more of the token_set_ratio score. Intentionally left as-is rather than tuned to pass -- demonstrates the matcher is sensitive to company-name length, a real calibration edge worth knowing about, not a hidden bug.",
+      "MAY_slip": "reimbursement decoy in the same window as the real salary credit (4500 vs expected 78000) -> the real salary credit is correctly selected over the reimbursement (SALARY_DATE PASS, 83.5); EMPLOYER also fails here for the same short-company-name reason as April (76.47)",
+      "JUNE_slip": "genuinely missing bank credit -- no transaction anywhere near the window matches -- SALARY_DATE FAILS for this slip specifically (0.0, reason=no_matching_credit_in_window), EMPLOYER also fails as an unavoidable consequence (nothing to verify employer against). Contributes to a lowered SALARY_CREDIT_COUNT (3/4 = 75%) but does NOT hard-fail the whole case, per spec -- SALARY_CREDIT_COUNT only feeds the weighted score.",
+      "noise_transactions": "a rent debit, two small unrelated debits, and an unrelated company's credit (QUANTUM CONSULTING REFERRAL BONUS) sitting outside every slip's window -- all correctly ignored/never selected as a match",
+      "amount_tolerance_gate": "SALARY_AMOUNT_TOLERANCE_PCT (3%) in validation_config.py hard-excludes any transaction whose amount is not within 3% of the slip's declared net_salary from even being a match candidate, regardless of narration/employer score. This is why the May reimbursement (4500 vs expected 78000, ~94% off) can never be mistaken for the real salary credit -- and why a decoy transaction closer in amount (tested separately in edge_case_scenarios.py) is also correctly excluded rather than relying on narration keywords like 'REIMBURSEMENT', which don't generalize."
+    },
+    "expected_overall_decision": "NEEDS_REVIEW at ~88.4 overall score -- driven by the June missing credit plus two borderline EMPLOYER checks, not a single dominant failure. Re-verify this note against actual output after any change to matching/scoring/decision code: run `python scripts/run_demo.py` and diff the printed Decision block against this note."
+  },
+  "applicant_ref": "APP-2026-00134",
+  "documents": [
+    {
+      "doc_type": "AADHAAR",
+      "extracted_fields": {
+        "name": "Sneha Sunil Lokhande",
+        "address": "Flat 204, Green Heights, Baner, Pune, Maharashtra 411045",
+        "aadhaar_number": "XXXX XXXX 4321",
+        "date_of_birth": "1995-03-14"
+      },
+      "source_file_ref": "s3://kyc-docs/APP-2026-00123/aadhaar_front.pdf"
+    },
+    {
+      "doc_type": "PAN",
+      "extracted_fields": {
+        "name": "Sneha Lokhande",
+        "pan_number": "ABCDE1234F"
+      },
+      "source_file_ref": "s3://kyc-docs/APP-2026-00123/pan_card.pdf"
+    }, 
+    {
+      "doc_type": "ADDRESS_PROOF",
+      "extracted_fields": {
+        "address": "Apartment 204, Green Heights, Baner, Pune, MH 411045"
+      },
+      "source_file_ref": "s3://kyc-docs/APP-2026-00123/address_proof.pdf"
+    },
+    { 
+      "doc_type": "SALARY_SLIP",
+      "salary_slips": [
+        {
+          "extracted_fields": {
+            "name": "Sneha Sunil Lokhande",
+            "employer_name": "ABC Technologies Pvt Ltd",
+            "net_salary": 75000,
+            "salary_month": "2026-03"
+          },
+          "source_file_ref": "s3://kyc-docs/APP-2026-00123/salary_slip_march.pdf"
+        },
+        { 
+          "extracted_fields": {
+            "name": "Sneha Sunil Lokhande",
+            "employer_name": "Nimbus Retail Pvt Ltd",
+            "net_salary": 79000,
+            "salary_month": "2026-04"
+          },
+          "source_file_ref": "s3://kyc-docs/APP-2026-00123/salary_slip_april.pdf"
+        },
+        {
+          "extracted_fields": {
+            "name": "Sneha Sunil Lokhande",
+            "employer_name": "Nimbus Retail Pvt Ltd",
+            "net_salary": 78000,
+            "salary_month": "2026-05"
+          },
+          "source_file_ref": "s3://kyc-docs/APP-2026-00123/salary_slip_may.pdf"
+        },
+        {
+          "extracted_fields": {
+            "name": "Sneha Sunil Lokhande",
+            "employer_name": "Nimbus Retail Pvt Ltd",
+            "net_salary": 78000,
+            "salary_month": "2026-06"
+          },
+          "source_file_ref": "s3://kyc-docs/APP-2026-00123/salary_slip_june.pdf"
+        }
+      ]
+    },
+    {
+      "doc_type": "BANK_STATEMENT",
+      "extracted_fields": {
+        "name": "Lokhande S. S.",
+        "transactions": [
+          {
+            "narration": "ABC TECHNOLOGIES SALARY MAR",
+            "amount": 75000,
+            "date": "2026-04-01"
+          },
+          {
+            "narration": "HOUSE RENT EMI DEBIT",
+            "amount": -18000,
+            "date": "2026-04-03"
+          },
+          {
+            "narration": "NIMBUS RETAIL SALARY APR",
+            "amount": 79000,
+            "date": "2026-05-02"
+          },
+          {
+            "narration": "ZEPTO MART PAYMENT",
+            "amount": -620,
+            "date": "2026-05-08"
+          },
+          {
+            "narration": "NIMBUS RETAIL SALARY MAY",
+            "amount": 78000,
+            "date": "2026-06-02"
+          },
+          {
+            "narration": "NIMBUS RETAIL REIMBURSEMENT TRAVEL",
+            "amount": 4500,
+            "date": "2026-06-05"
+          },
+          {
+            "narration": "SWIGGY ORDER PAYMENT",
+            "amount": -450,
+            "date": "2026-06-10"
+          },
+          {
+            "narration": "QUANTUM CONSULTING REFERRAL BONUS",
+            "amount": 15000,
+            "date": "2026-07-04"
+          }
+        ]
+      },
+      "source_file_ref": "s3://kyc-docs/APP-2026-00123/bank_statement_mar_to_jul.pdf"
+    }
+  ]
+}

@@ -4,6 +4,7 @@ from collections.abc import AsyncGenerator
 from fastapi import FastAPI
 from sqlalchemy import text
 
+from app.api.cases import router as cases_router
 from app.api.health import router as health_router
 from app.config import logger, settings
 from app.database import async_session, engine
@@ -34,3 +35,4 @@ app = FastAPI(
 )
 
 app.include_router(health_router)
+app.include_router(cases_router)

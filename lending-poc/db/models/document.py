@@ -18,7 +18,7 @@ class Document(Base):
     )
     doc_type: Mapped[DocType] = mapped_column(SAEnum(DocType, name="doc_type"), nullable=False)
     extracted_fields: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    source_file_ref: Mapped[str] = mapped_column(String, nullable=False)
+    source_file_ref: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     case: Mapped["Case"] = relationship(back_populates="documents")

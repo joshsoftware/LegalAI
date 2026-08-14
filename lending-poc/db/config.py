@@ -6,7 +6,7 @@ class Settings(BaseSettings):
 
     DEBUG: bool = False
     DATABASE_URL: str
-    ENCRYPTION_KEY: str = ""
+    ENCRYPTION_KEY: str
 
 
 settings = Settings()

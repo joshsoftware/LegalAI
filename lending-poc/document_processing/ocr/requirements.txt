@@ -1,0 +1,9 @@
+# Core OCR dependencies
+surya-ocr
+pypdfium2
+pillow
+
+# API dependencies
+fastapi
+python-multipart
+uvicorn[standard]
