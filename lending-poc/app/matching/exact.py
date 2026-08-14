@@ -51,6 +51,8 @@ def aadhaar_match(golden: str | None, candidate: str | None) -> ExactCheckOutcom
         trailing_digits = "".join(ch for ch in masked if ch != "X")
         if not trailing_digits:
             return ExactCheckOutcome(MatchResult.INCONCLUSIVE, "no_unmasked_digits")
+        if len(trailing_digits) < MIN_OVERLAPPING_DIGITS:
+            return ExactCheckOutcome(MatchResult.INCONCLUSIVE, "insufficient_unmasked_digits")
         if len(unmasked) < len(trailing_digits):
             return ExactCheckOutcome(MatchResult.INCONCLUSIVE, "unmasked_value_too_short")
         suffix = unmasked[-len(trailing_digits):]

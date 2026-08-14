@@ -27,6 +27,18 @@ _DECISION_TO_CASE_STATUS = {
 }
 
 
+def _mask_pan(pan: str | None) -> str | None:
+    """Mask all but the last 4 characters of a PAN for JSONB storage.
+
+    The full value is encrypted in the GoldenRecord; the document payload
+    only needs enough for audit trail without exposing the raw PAN.
+    """
+    if not pan:
+        return pan
+    visible = min(4, len(pan))
+    return "X" * (len(pan) - visible) + pan[-visible:]
+
+
 def _document_rows(case: CaseInput) -> list[tuple[str, Document]]:
     """Returns (doc_id, Document) pairs for every document present on the case."""
     rows: list[tuple[str, Document]] = []
@@ -52,7 +64,7 @@ def _document_rows(case: CaseInput) -> list[tuple[str, Document]]:
             Document(
                 doc_type=DocType.PAN,
                 source_file_ref=case.pan.source_file_ref,
-                extracted_fields={"name": case.pan.name, "pan_number": case.pan.pan_number},
+                extracted_fields={"name": case.pan.name, "pan_number": _mask_pan(case.pan.pan_number)},
             ),
         ))
 
