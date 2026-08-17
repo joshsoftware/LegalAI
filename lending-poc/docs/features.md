@@ -4,7 +4,7 @@ This document explains, in detail, what the validation pipeline behind `POST /ca
 
 ## 1. Pipeline overview
 
-`app/services/pipeline.py` orchestrates one end-to-end run in this order:
+`cross_document_validation/services/pipeline.py` orchestrates one end-to-end run in this order:
 
 ```
 INGEST -> required-document precheck -> GOLDEN RECORD -> IDENTITY VALIDATION
@@ -17,7 +17,7 @@ Every step appends a line to an in-memory `audit_log`, giving a readable trail o
 
 Before anything else runs, the pipeline checks that all of `AADHAAR`, `PAN`, `SALARY_SLIP`, `BANK_STATEMENT` are present (`validation_config.REQUIRED_DOCUMENT_TYPES`). If any are missing, the pipeline short-circuits with `decision=FAIL`, `overall_score=0.0`, and reasons like `MISSING_DOCUMENT:PAN` — no golden record or checks are computed.
 
-## 2. Golden Record (`app/services/golden_record.py`)
+## 2. Golden Record (`cross_document_validation/services/golden_record.py`)
 
 The Golden Record is the single trusted identity profile for the applicant, built by merging the KYC documents:
 
@@ -29,11 +29,11 @@ The Golden Record is the single trusted identity profile for the applicant, buil
   - If both have a name, and they're recognizably the same person (`fuzzy.name_similarity` >= `NAME_MATCH_THRESHOLD`, 85), the **fuller** name (more tokens) wins — e.g. "Sneha Sunil Lokhande" over "Sneha Lokhande" — because it carries strictly more identity information.
   - If the two names *aren't* recognizably related, Aadhaar stays authoritative and the mismatch is left for the NAME identity check to flag, rather than silently trusting an unrelated "fuller" name.
 - The chosen name is split into `first_name` / `middle_name` / `last_name`.
-- If an address was resolved, an address embedding is computed (`app.matching.embeddings.get_address_embedding`) and stored for later similarity checks.
+- If an address was resolved, an address embedding is computed (`cross_document_validation.matching.embeddings.get_address_embedding`) and stored for later similarity checks.
 
 Each golden field also records its `*_source` (which document it came from), useful for traceability.
 
-## 3. Identity Validation (`app/services/identity_validation.py`)
+## 3. Identity Validation (`cross_document_validation/services/identity_validation.py`)
 
 Two parts:
 
@@ -53,12 +53,12 @@ Every document that carries an identity field is compared against the Golden Rec
 | Each SALARY_SLIP | name |
 | BANK_STATEMENT | name |
 
-Matching strategies (`app/matching/`):
+Matching strategies (`cross_document_validation/matching/`):
 - **NAME** — fuzzy string similarity (`fuzzy.name_similarity`), handles reordering (surname-first), initials, and minor spelling differences. Passes at >= 85.
 - **ADDRESS** — embedding cosine similarity (`embeddings.address_similarity`), tolerant of differently-worded but equivalent addresses (e.g. "Apartment" vs "Flat", "MH" vs "Maharashtra"). Passes at >= 0.55 similarity (scored as similarity × 100).
-- **AADHAAR / PAN / DOB** — exact matching (`app.matching.exact`). Result is `MATCH` (score 100), `NO_MATCH` (score 0), or `INCONCLUSIVE` (score 50, e.g. one side missing/unparseable).
+- **AADHAAR / PAN / DOB** — exact matching (`cross_document_validation.matching.exact`). Result is `MATCH` (score 100), `NO_MATCH` (score 0), or `INCONCLUSIVE` (score 50, e.g. one side missing/unparseable).
 
-## 4. Business Validation (`app/services/business_validation.py`)
+## 4. Business Validation (`cross_document_validation/services/business_validation.py`)
 
 Verifies that declared income (salary slips) is corroborated by actual bank activity. Only runs if both salary slips and a bank statement are present.
 
@@ -81,7 +81,7 @@ Each slip's declared `employer_name` is compared — via fuzzy similarity — on
 
 An aggregate check: `matched_slips / total_slips × 100`. It passes only if *every* slip matched a transaction, but a partial match (e.g. 3 of 4 months) doesn't hard-fail the case — it only lowers this component's score, which feeds into the weighted overall score. Evidence includes the bank statement's observed date range and match counts.
 
-## 5. Scoring (`app/services/scoring.py`)
+## 5. Scoring (`cross_document_validation/services/scoring.py`)
 
 Given every `ValidationResult` produced above:
 1. Scores are grouped by `check_type` and averaged (e.g. if 4 salary slips each produced a `SALARY_DATE` score, they're averaged into one `SALARY_DATE` component score).
@@ -99,7 +99,7 @@ Given every `ValidationResult` produced above:
 
 3. The overall score is the weighted average, **renormalized over only the check types actually observed** in this case (so a case missing an optional check type doesn't get unfairly diluted by a zero for a check that never ran). Note `SALARY_DATE` itself isn't in the weight table — it gates whether a credit was found at all, but the weighted score is driven by `EMPLOYER` and `SALARY_CREDIT_COUNT`.
 
-## 6. Decision Engine (`app/services/decision_engine.py`)
+## 6. Decision Engine (`cross_document_validation/services/decision_engine.py`)
 
 Final decision logic, in priority order:
 
@@ -108,7 +108,7 @@ Final decision logic, in priority order:
 3. **FAIL** — if `overall_score < DECISION_FAIL_THRESHOLD` (60).
 4. **NEEDS_REVIEW** — anything in between (60–90). Reasons list every individual failing check as `<CHECK_TYPE>:<failure_reason>`.
 
-## 7. Persistence (`app/services/persistence.py`)
+## 7. Persistence (`cross_document_validation/services/persistence.py`)
 
 A successful pipeline run is persisted in a single DB transaction:
 - One `Case` row (`applicant_ref`, `status` derived from the decision: PASS/FAIL/NEEDS_REVIEW).
@@ -129,7 +129,7 @@ Document primary keys are resolved via an in-memory `doc_id -> Document.id` map 
 | `SALARY_SLIP` | Declared income; multiple allowed per case (one per month) |
 | `BANK_STATEMENT` | Source of truth for actual salary credits |
 
-## 9. Configuration reference (`app/services/validation_config.py`)
+## 9. Configuration reference (`cross_document_validation/services/validation_config.py`)
 
 All thresholds/weights are centralized here as plain constants (intended to move into `app/config.py` / environment-driven settings as the app matures, without touching service logic):
 

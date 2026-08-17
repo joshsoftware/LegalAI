@@ -5,7 +5,7 @@ Used by the POST /cases endpoint.
 
 from datetime import date, datetime
 
-from app.services.dto import (
+from cross_document_validation.services.dto import (
     AadhaarDoc,
     AddressProofDoc,
     BankStatementDoc,

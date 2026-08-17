@@ -4,10 +4,10 @@ from collections.abc import AsyncGenerator
 from fastapi import FastAPI
 from sqlalchemy import text
 
-from app.api.cases import router as cases_router
 from app.api.health import router as health_router
 from app.config import logger, settings
 from app.database import async_session, engine
+from cross_document_validation.api import router as cases_router
 
 
 @asynccontextmanager

@@ -2,8 +2,8 @@
 
 from collections import defaultdict
 
-from app.services import validation_config as cfg
-from app.services.dto import ScoreResult, ValidationResult
+from cross_document_validation.services import validation_config as cfg
+from cross_document_validation.services.dto import ScoreResult, ValidationResult
 
 
 def compute_score(validation_results: list[ValidationResult]) -> ScoreResult:

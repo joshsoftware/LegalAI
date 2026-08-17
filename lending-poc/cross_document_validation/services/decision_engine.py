@@ -1,7 +1,7 @@
 """Final PASS / FAIL / NEEDS_REVIEW logic."""
 
-from app.services import validation_config as cfg
-from app.services.dto import CheckType, Decision, DecisionResult, ScoreResult, ValidationResult
+from cross_document_validation.services import validation_config as cfg
+from cross_document_validation.services.dto import CheckType, Decision, DecisionResult, ScoreResult, ValidationResult
 
 MANDATORY_CHECK_TYPES = {CheckType.NAME, CheckType.AADHAAR, CheckType.PAN, CheckType.DOB}
 
