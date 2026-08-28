@@ -192,6 +192,13 @@ services:
       FIELD_MAPPING_BASE_URL: http://field_mapping:8002
       OCR_BASE_URL: http://ocr:8010
       TRANSLATION_BASE_URL: http://translation:8001
+      # Each backend calls out to a local model and can legitimately run for
+      # minutes (OCR to Surya, translation/field-mapping to Ollama) — these
+      # match the timeouts the frontend already budgets for the same calls,
+      # so the gateway is never the first link in the chain to give up.
+      OCR_REQUEST_TIMEOUT_SECONDS: ${OCR_REQUEST_TIMEOUT_SECONDS:-300}
+      TRANSLATION_REQUEST_TIMEOUT_SECONDS: ${TRANSLATION_REQUEST_TIMEOUT_SECONDS:-300}
+      FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS: ${FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS:-300}
     volumes:
       - ./gateway:/app
     depends_on:
