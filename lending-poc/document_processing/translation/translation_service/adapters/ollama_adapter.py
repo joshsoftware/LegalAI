@@ -60,11 +60,16 @@ class OllamaAdapter(ModelAdapter):
         """
         Blocking probe shared by health_check() (CLI) and the background
         monitor (server). Deliberately untimed — see module docstring.
+        Uses the same model_options as translate() (only num_predict is
+        overridden) so the ping never causes Ollama to reload the model with
+        a different context size than real translate calls use — a mismatch
+        that was forcing a full llama-server restart (~250s) on every ping/
+        translate interleaving.
         """
         chat(
             model=self.model_name,
             messages=[{"role": "user", "content": "ping"}],
-            options={"num_predict": 1},
+            options={**self.model_options, "num_predict": 1},
         )
 
     def health_check(self) -> bool:
