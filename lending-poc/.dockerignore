@@ -5,10 +5,12 @@
 **/surya-env
 **/node_modules
 **/__pycache__
-document_processing
-field_mapping_poc
-gateway
+# document_processing/, field_mapping_poc/, gateway/, and scripts/ are all
+# part of the root build context now — the root Dockerfile builds the single
+# combined backend image (all five services) rather than just app/, so their
+# requirements.txt, source, and the entrypoint script all have to be
+# reachable from here. Only frontend/ and docs/ stay out: frontend has its
+# own image, docs ship nothing.
 frontend
-scripts
 docs
 *.log

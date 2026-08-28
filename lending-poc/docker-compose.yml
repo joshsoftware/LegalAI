@@ -17,21 +17,6 @@ services:
       timeout: 5s
       retries: 5
 
-  app:
-    build: .
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql+asyncpg://postgres:postgres@db:5432/lending_poc}
-    volumes:
-      - .:/app
-    depends_on:
-      db:
-        condition: service_healthy
-
   # Ollama's own image already auto-detects CUDA at runtime and falls back
   # to CPU on its own — no custom build needed here, just the same cpu/gpu
   # profile split used for surya-inference/ocr below, so GPU access is only
@@ -65,45 +50,6 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
-
-  field_mapping:
-    build: ./field_mapping_poc
-    command: uvicorn api:app --host 0.0.0.0 --port 8002 --reload
-    ports:
-      - "8002:8002"
-    environment:
-      OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e4b-it-qat}
-      # Cold model load alone can take 2+ minutes; give the first call after
-      # an idle gap enough headroom instead of timing out mid-load.
-      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-300}
-    volumes:
-      - ./field_mapping_poc:/app
-    depends_on:
-      ollama:
-        condition: service_started
-        required: false
-      ollama-gpu:
-        condition: service_started
-        required: false
-
-  translation:
-    build: ./document_processing/translation
-    command: uvicorn api_server:app --host 0.0.0.0 --port 8001 --reload
-    ports:
-      - "8001:8001"
-    environment:
-      OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e4b-it-qat}
-    volumes:
-      - ./document_processing/translation:/app
-    depends_on:
-      ollama:
-        condition: service_started
-        required: false
-      ollama-gpu:
-        condition: service_started
-        required: false
 
   # surya-inference and ocr each come in a "cpu" and "gpu" variant, selected
   # via COMPOSE_PROFILES in .env (defaults to "cpu" so plain `docker compose
@@ -144,19 +90,67 @@ services:
               count: all
               capabilities: [gpu]
 
-  ocr:
-    &ocr
-    build: ./document_processing/ocr
+  # app, translation, field-mapping, ocr, and gateway run as five separate
+  # uvicorn processes inside one image (see scripts/start-combined.sh) —
+  # none of their own code changed, this just co-locates them. Internal
+  # *_BASE_URL vars point at 127.0.0.1 since they're now processes in the
+  # same container rather than separate services on the Docker network.
+  # Same cpu/gpu profile split as ollama/surya-inference above: the GPU
+  # build arg controls which torch wheel gets installed for the two
+  # torch-dependent deps in here (sentence-transformers, surya-ocr).
+  backend:
+    &backend
+    build:
+      context: .
+      args:
+        GPU: "0"
     profiles: ["cpu"]
-    command: uvicorn api:app --host 0.0.0.0 --port 8010 --reload
     ports:
+      - "8000:8000"
+      - "8001:8001"
+      - "8002:8002"
       - "8010:8010"
+      - "8080:8080"
+    env_file:
+      - .env
     environment:
+      DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql+asyncpg://postgres:postgres@db:5432/lending_poc}
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e4b-it-qat}
+      # Cold model load alone can take 2+ minutes; give the first call after
+      # an idle gap enough headroom instead of timing out mid-load.
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-300}
       SURYA_INFERENCE_URL: http://surya-inference:8000/v1
       SURYA_INFERENCE_AUTOSTART: "false"
+      APP_BASE_URL: http://127.0.0.1:8000
+      TRANSLATION_BASE_URL: http://127.0.0.1:8001
+      FIELD_MAPPING_BASE_URL: http://127.0.0.1:8002
+      OCR_BASE_URL: http://127.0.0.1:8010
+      # Each backend has a model in its path and can legitimately run for
+      # minutes (OCR to Surya, translation/field-mapping to Ollama, /cases
+      # loading a sentence-transformers model on first call) — these match
+      # the timeouts the frontend already budgets for the same calls, so the
+      # gateway is never the first link in the chain to give up.
+      OCR_REQUEST_TIMEOUT_SECONDS: ${OCR_REQUEST_TIMEOUT_SECONDS:-300}
+      TRANSLATION_REQUEST_TIMEOUT_SECONDS: ${TRANSLATION_REQUEST_TIMEOUT_SECONDS:-300}
+      FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS: ${FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS:-300}
+      APP_REQUEST_TIMEOUT_SECONDS: ${APP_REQUEST_TIMEOUT_SECONDS:-300}
     volumes:
-      - ./document_processing/ocr:/app
+      - .:/app
+      # Both /cases (sentence-transformers) and OCR (surya-ocr) pull their
+      # models from the HuggingFace hub on first use. Without this the
+      # download repeats on every container recreate, which takes minutes and
+      # needs network — same reasoning as ollama_models/surya_models above.
+      - hf_cache:/root/.cache/huggingface
     depends_on:
+      db:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+        required: false
+      ollama-gpu:
+        condition: service_started
+        required: false
       surya-inference:
         condition: service_started
         required: false
@@ -164,17 +158,17 @@ services:
         condition: service_started
         required: false
 
-  ocr-gpu:
-    <<: *ocr
+  backend-gpu:
+    <<: *backend
     profiles: ["gpu"]
     build:
-      context: ./document_processing/ocr
+      context: .
       args:
         GPU: "1"
     networks:
       default:
         aliases:
-          - ocr
+          - backend
     deploy:
       resources:
         reservations:
@@ -182,36 +176,6 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
-
-  gateway:
-    build: ./gateway
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-    ports:
-      - "8080:8000"
-    environment:
-      FIELD_MAPPING_BASE_URL: http://field_mapping:8002
-      OCR_BASE_URL: http://ocr:8010
-      TRANSLATION_BASE_URL: http://translation:8001
-      # Each backend calls out to a local model and can legitimately run for
-      # minutes (OCR to Surya, translation/field-mapping to Ollama) — these
-      # match the timeouts the frontend already budgets for the same calls,
-      # so the gateway is never the first link in the chain to give up.
-      OCR_REQUEST_TIMEOUT_SECONDS: ${OCR_REQUEST_TIMEOUT_SECONDS:-300}
-      TRANSLATION_REQUEST_TIMEOUT_SECONDS: ${TRANSLATION_REQUEST_TIMEOUT_SECONDS:-300}
-      FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS: ${FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS:-300}
-    volumes:
-      - ./gateway:/app
-    depends_on:
-      field_mapping:
-        condition: service_started
-      ocr:
-        condition: service_started
-        required: false
-      ocr-gpu:
-        condition: service_started
-        required: false
-      translation:
-        condition: service_started
 
   frontend:
     build: ./frontend
@@ -230,3 +194,4 @@ volumes:
   pgdata:
   ollama_models:
   surya_models:
+  hf_cache:
