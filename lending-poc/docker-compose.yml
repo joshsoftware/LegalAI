@@ -9,6 +9,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-lending_poc}
     ports:
       - "${POSTGRES_HOST_PORT:-55439}:5432"
+    restart: unless-stopped
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -25,6 +26,7 @@ services:
     &ollama
     image: ollama/ollama:latest
     profiles: ["cpu"]
+    restart: unless-stopped
     ports:
       - "11434:11434"
     environment:
@@ -105,6 +107,7 @@ services:
       args:
         GPU: "0"
     profiles: ["cpu"]
+    restart: unless-stopped
     ports:
       - "8000:8000"
       - "8001:8001"

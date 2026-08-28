@@ -1,8 +1,20 @@
-FROM python:3.12-slim
+# Multi-stage build: gcc/libpq-dev and pip's build cache are only needed to
+# *install* the dependencies below, not to run them (nothing here uses
+# psycopg — asyncpg, the actual Postgres driver, ships its own compiled
+# protocol implementation and needs neither). Keeping them confined to this
+# "build" stage means they never end up in the final image, which the single-
+# stage version of this Dockerfile used to ship unnecessarily.
+FROM python:3.12-slim AS build
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev gcc \
     && rm -rf /var/lib/apt/lists/*
+
+# Installing into a venv (rather than the system site-packages) means the
+# final stage can grab everything with one `COPY --from=build /opt/venv`,
+# instead of having to know the exact site-packages path to copy.
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /app
 
@@ -41,6 +53,15 @@ RUN pip install --no-cache-dir . \
     && pip install --no-cache-dir -r /deps/translation.txt \
     && pip install --no-cache-dir -r /deps/ocr.txt \
     && pip install --no-cache-dir -r /deps/gateway.txt
+
+# Final stage: no compiler, no dev headers, no pip build cache — just the
+# Python runtime, the installed venv, and the source.
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY --from=build /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
 COPY . .
 
