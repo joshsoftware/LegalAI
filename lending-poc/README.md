@@ -45,11 +45,16 @@ see [Using a GPU](#using-a-gpu) below.
 docker compose up --build -d
 ```
 
-This builds and starts every service: `db`, `app`, `ollama`, `field_mapping`,
-`translation`, `surya-inference` + `ocr`, `gateway`, and `frontend`.
+This builds and starts every service: `db`, `ollama`, `surya-inference`,
+`backend` (which runs `app`, `field_mapping`, `translation`, `ocr`, and
+`gateway` as five processes in one container — see
+[Inside the backend container](#inside-the-backend-container) below), and
+`frontend`.
 
 The first run takes a while — Ollama and Surya both download models on
-first use. Watch progress with:
+first use, and `backend`'s image build is the slowest of the bunch (it
+installs every service's dependencies, including two separate CPU-only
+PyTorch installs). Watch progress with:
 
 ```bash
 docker compose logs -f
@@ -57,10 +62,11 @@ docker compose logs -f
 
 ## 3. Run database migrations
 
-The `app` container doesn't run migrations automatically on startup:
+`app` (one of the five processes in the `backend` container) doesn't run
+migrations automatically on startup:
 
 ```bash
-docker compose exec app alembic -c db/alembic.ini upgrade head
+docker compose exec backend alembic -c db/alembic.ini upgrade head
 ```
 
 ## 4. Pull the Ollama model
@@ -80,23 +86,45 @@ the command above.)
 | Service | URL | Notes |
 |---|---|---|
 | Frontend | http://localhost:5173 | Main UI |
-| Gateway | http://localhost:8080 | Fronts OCR / translation / field-mapping |
-| App (backend API) | http://localhost:8000 | Docs at `/docs`; health at `/health` |
+| Gateway | http://localhost:8080 | Single public entrypoint — fronts app/OCR/translation/field-mapping |
+| App (cases API) | http://localhost:8000 | Docs at `/docs`; also reachable via gateway at `/cases`, `/app/health` |
 | Postgres | localhost:55439 | pgvector-enabled |
-| OCR | http://localhost:8010 | Not normally called directly |
-| Translation | http://localhost:8001 | Not normally called directly |
-| Field mapping | http://localhost:8002 | Not normally called directly |
+| OCR | http://localhost:8010 | Also reachable via gateway at `/extract`, `/ocr/health` |
+| Translation | http://localhost:8001 | Also reachable via gateway at `/translate/*`, `/translation/health` |
+| Field mapping | http://localhost:8002 | Also reachable via gateway at `/map`, `/field-mapping/health` |
 | Surya inference | http://localhost:8500 | OCR's inference backend |
 
-There are effectively two subsystems sharing this compose file: the
-`app` + `db` lending backend, and a separate OCR/translation/field-mapping
-pipeline fronted by `gateway`. The frontend talks to the gateway for
-document processing and to the app for everything else.
+`app`, `ocr`, `translation`, `field_mapping`, and `gateway` all run inside
+the single `backend` container (see below) — the four backend ports above
+are published straight from that container for direct debugging, but the
+frontend and any external caller should go through the gateway on `:8080`,
+which proxies to all four and exposes one aggregate `/health`.
+
+### Inside the backend container
+
+`backend` (and its GPU twin `backend-gpu`) runs five independent
+processes rather than one — `scripts/start-combined.sh` starts each with
+its own `uvicorn` command, on its own port, exactly as it would run
+standalone:
+
+| Process | Port | Role |
+|---|---|---|
+| `app` | 8000 | Case submission and decisioning (`/cases`) |
+| `translation` | 8001 | OCR-text translation |
+| `field_mapping` | 8002 | Maps OCR text onto a target JSON schema |
+| `ocr` | 8010 | Document text extraction (calls `surya-inference`) |
+| `gateway` | 8080 | Reverse-proxies to the other four on one public port |
+
+None of the five services' own code is aware they share a container —
+each is the same FastAPI app it would be if it ran alone, just co-located
+for fewer containers to manage. `docker compose logs -f backend` shows
+all five processes' output interleaved, prefixed the same way regardless
+of which one logged it.
 
 ## Using a GPU
 
-`surya-inference`/`ocr` and `ollama` each come in a CPU and a GPU variant,
-selected by `COMPOSE_PROFILES` in `.env`:
+`surya-inference`, `backend` (which includes `ocr`), and `ollama` each
+come in a CPU and a GPU variant, selected by `COMPOSE_PROFILES` in `.env`:
 
 - `COMPOSE_PROFILES=cpu` (default) — always works, no GPU required.
 - `COMPOSE_PROFILES=gpu` — requires an NVIDIA GPU on the host plus the
@@ -119,11 +147,13 @@ fail to create the containers at all if the toolkit isn't installed,
 since the GPU device reservation can't be satisfied.
 
 Ollama's own image auto-detects CUDA at runtime with no separate build, so
-switching the profile is enough for it; `surya-inference`/`ocr` are built
-from CUDA base images specifically for the `gpu` profile (see
-[docker-compose.yml](docker-compose.yml) and
+switching the profile is enough for it. `surya-inference` is built from a
+CUDA base image for the `gpu` profile (see
 [document_processing/ocr/README.md](document_processing/ocr/README.md)
-for details).
+for details); `backend-gpu` instead passes a `GPU=1` build arg that skips
+pinning the CPU-only PyTorch wheel, so `ocr` (surya-ocr) and `app`
+(sentence-transformers) install CUDA-enabled PyTorch instead — see
+[docker-compose.yml](docker-compose.yml) and the [Dockerfile](Dockerfile).
 
 ## Stopping and cleanup
 
@@ -132,8 +162,8 @@ docker compose down
 ```
 
 Add `-v` to also delete the named volumes (`pgdata`, `ollama_models`,
-`surya_models`) — this wipes the database and downloaded models, so only
-do this if you want a clean slate:
+`surya_models`, `hf_cache`) — this wipes the database and downloaded
+models, so only do this if you want a clean slate:
 
 ```bash
 docker compose down -v

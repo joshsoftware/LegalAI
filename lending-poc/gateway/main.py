@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Single public FastAPI entrypoint that fronts the three independent
-document-processing services (OCR, translation, field-mapping).
+"""Single public FastAPI entrypoint that fronts the four independent
+backend services (OCR, translation, field-mapping, and the core app/cases
+API).
 
 Each backend module keeps running exactly as it already does today, in its
 own process/venv, on its own internal port. This gateway does not import or
@@ -23,15 +24,20 @@ from fastapi.responses import JSONResponse, Response
 OCR_BASE_URL = os.environ.get("OCR_BASE_URL", "http://127.0.0.1:8010")
 TRANSLATION_BASE_URL = os.environ.get("TRANSLATION_BASE_URL", "http://127.0.0.1:8001")
 FIELD_MAPPING_BASE_URL = os.environ.get("FIELD_MAPPING_BASE_URL", "http://127.0.0.1:8002")
+APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://127.0.0.1:8000")
 
-# Per-service request timeouts. Each backend calls out to a local model (OCR
-# to Surya, translation/field-mapping to Ollama) and can legitimately run for
-# minutes — these match the timeouts the frontend already budgets for the
+# Per-service request timeouts. Every backend has a model somewhere in its
+# path and can legitimately run for minutes — OCR calls Surya,
+# translation/field-mapping call Ollama, and /cases loads a
+# sentence-transformers embedding model on its first request (downloading it
+# from HuggingFace if it isn't cached yet, which alone outlasts any short
+# timeout). These match the timeouts the frontend already budgets for the
 # same calls (see frontend/src/api/{extract,translation,fieldMapping}.ts), so
 # the gateway is never the first link in the chain to give up.
 OCR_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("OCR_REQUEST_TIMEOUT_SECONDS", "300"))
 TRANSLATION_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("TRANSLATION_REQUEST_TIMEOUT_SECONDS", "300"))
 FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS", "300"))
+APP_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("APP_REQUEST_TIMEOUT_SECONDS", "300"))
 
 # Headers that must not be forwarded as-is between hops (RFC 7230) plus a few
 # that httpx/Starlette will recompute themselves and that would otherwise
@@ -88,7 +94,7 @@ async def _proxy(request: Request, base_url: str, path: str, timeout: float) -> 
 
 
 # --- Business endpoints (unprefixed — these paths don't collide across the
-# three modules, so the frontend needs no path changes beyond one base URL) ---
+# four modules, so the frontend needs no path changes beyond one base URL) ---
 
 @app.post("/extract")
 async def extract(request: Request) -> Response:
@@ -110,7 +116,12 @@ async def map_fields(request: Request) -> Response:
     return await _proxy(request, FIELD_MAPPING_BASE_URL, "/map", timeout=FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS)
 
 
-# --- Per-service health (namespaced since all three modules define /health) ---
+@app.post("/cases")
+async def create_case(request: Request) -> Response:
+    return await _proxy(request, APP_BASE_URL, "/cases", timeout=APP_REQUEST_TIMEOUT_SECONDS)
+
+
+# --- Per-service health (namespaced since all four modules define /health) ---
 # Liveness probes, not business calls — kept short regardless of the
 # per-service request timeouts above, matching the aggregate /health below.
 HEALTH_PROXY_TIMEOUT_SECONDS = 5.0
@@ -131,6 +142,11 @@ async def field_mapping_health(request: Request) -> Response:
     return await _proxy(request, FIELD_MAPPING_BASE_URL, "/health", timeout=HEALTH_PROXY_TIMEOUT_SECONDS)
 
 
+@app.get("/app/health")
+async def app_health(request: Request) -> Response:
+    return await _proxy(request, APP_BASE_URL, "/health", timeout=HEALTH_PROXY_TIMEOUT_SECONDS)
+
+
 @app.get("/health")
 async def health(request: Request) -> dict:
     client: httpx.AsyncClient = request.app.state.http
@@ -139,6 +155,7 @@ async def health(request: Request) -> dict:
         ("ocr", OCR_BASE_URL),
         ("translation", TRANSLATION_BASE_URL),
         ("field_mapping", FIELD_MAPPING_BASE_URL),
+        ("app", APP_BASE_URL),
     ):
         try:
             resp = await client.get(f"{base}/health", timeout=HEALTH_PROXY_TIMEOUT_SECONDS)
@@ -159,9 +176,11 @@ async def root() -> dict:
             "POST /translate/text": "Translate text (proxies document_processing/translation)",
             "POST /translate/files": "Translate files (proxies document_processing/translation)",
             "POST /map": "Field mapping (proxies field_mapping_poc)",
-            "GET /health": "Aggregated health of all three backend services",
+            "POST /cases": "Case submission and decisioning (proxies app)",
+            "GET /health": "Aggregated health of all four backend services",
             "GET /ocr/health": "OCR service health",
             "GET /translation/health": "Translation service health",
             "GET /field-mapping/health": "Field mapping service health",
+            "GET /app/health": "App (cases) service health",
         },
     }
