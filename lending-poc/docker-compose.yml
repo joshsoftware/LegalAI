@@ -1,4 +1,20 @@
+# Local stack: Postgres, a local LLM (Ollama), OCR inference (Surya), the
+# combined backend (app/translation/field_mapping/ocr/gateway), and the
+# frontend.
+#
+# Most backend-facing services come in "cpu"/"gpu" pairs (e.g. ollama /
+# ollama-gpu), selected at `docker compose up` time via COMPOSE_PROFILES in
+# .env (defaults to "cpu" so a plain `docker compose up` always works with
+# no GPU setup). Each gpu variant is written with YAML's `<<: *name` merge
+# key to copy its cpu sibling's config and override only what differs (a
+# GPU device reservation, a different build), rather than duplicating the
+# whole block.
 services:
+  # Postgres with the pgvector extension, used for storing embeddings
+  # (see the sentence-transformers note on `backend` below). `healthcheck`
+  # lets `backend`'s `depends_on: condition: service_healthy` wait for
+  # Postgres to actually accept connections, not just for the container to
+  # start.
   db:
     image: pgvector/pgvector:pg16
     env_file:
@@ -41,6 +57,10 @@ services:
   ollama-gpu:
     <<: *ollama
     profiles: ["gpu"]
+    # Only one of ollama/ollama-gpu is ever running (profile-gated), so this
+    # alias makes ollama-gpu also answer to the plain name "ollama" on the
+    # Docker network — backend's OLLAMA_HOST doesn't need to know which
+    # variant is active.
     networks:
       default:
         aliases:
@@ -84,6 +104,10 @@ services:
       default:
         aliases:
           - surya-inference
+    # This is the container that actually does GPU-heavy OCR recognition.
+    # backend's Surya client (SURYA_INFERENCE_AUTOSTART=false) never runs a
+    # model locally — it just calls this service over HTTP
+    # (SURYA_INFERENCE_URL), so backend-gpu's own GPU is not involved in OCR.
     deploy:
       resources:
         reservations:
@@ -100,6 +124,11 @@ services:
   # Same cpu/gpu profile split as ollama/surya-inference above: the GPU
   # build arg controls which torch wheel gets installed for the two
   # torch-dependent deps in here (sentence-transformers, surya-ocr).
+  # Only sentence-transformers (embeddings for /cases) actually runs model
+  # inference in this container, so it's the only thing backend-gpu's GPU
+  # is used for — surya-ocr depends on torch too, but here it's just a thin
+  # HTTP client to the surya-inference service above, which does the real
+  # OCR GPU work.
   backend:
     &backend
     build:
@@ -108,6 +137,7 @@ services:
         GPU: "0"
     profiles: ["cpu"]
     restart: unless-stopped
+    # 8000 app, 8001 translation, 8002 field_mapping, 8010 ocr, 8080 gateway.
     ports:
       - "8000:8000"
       - "8001:8001"
@@ -145,6 +175,13 @@ services:
       # download repeats on every container recreate, which takes minutes and
       # needs network — same reasoning as ollama_models/surya_models above.
       - hf_cache:/root/.cache/huggingface
+    # Only one of ollama/ollama-gpu and one of surya-inference/surya-inference-gpu
+    # exists at runtime (profile-gated), so all four are listed here as
+    # required: false — backend can't hard-depend on whichever specific one
+    # isn't active for the current profile. Without required: false (the
+    # default), Compose would refuse to start backend at all: it would wait
+    # on a service that was never created because it belongs to the profile
+    # you're not running (e.g. waiting on ollama-gpu while running COMPOSE_PROFILES=cpu).
     depends_on:
       db:
         condition: service_healthy
@@ -168,6 +205,8 @@ services:
       context: .
       args:
         GPU: "1"
+    # Same alias trick as ollama-gpu: makes backend-gpu answer to the plain
+    # name "backend" so nothing downstream needs to know which is active.
     networks:
       default:
         aliases:
@@ -193,6 +232,8 @@ services:
       - ./frontend:/app
       - /app/node_modules
 
+# Named volumes so DB data and downloaded ML model weights survive
+# container recreation instead of being re-fetched/reset every time.
 volumes:
   pgdata:
   ollama_models:
