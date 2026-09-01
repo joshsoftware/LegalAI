@@ -27,6 +27,7 @@ pinned status at whatever it last was. See _ping() and _monitor_loop() below.
 """
 
 import asyncio
+import contextlib
 
 import httpx
 import ollama
@@ -164,9 +165,24 @@ class OllamaAdapter(ModelAdapter):
         self._monitor_task = asyncio.create_task(self._monitor_loop())
 
     async def stop_monitoring(self) -> None:
-        """Stop the background monitor started by start_monitoring()."""
+        """
+        Stop the background monitor started by start_monitoring().
+
+        Awaits the cancellation rather than just requesting it: cancel() only
+        schedules a CancelledError into the task, so returning immediately can
+        leave it still pending when the event loop closes ("Task was destroyed
+        but it is pending!"). Awaiting re-raises that CancelledError here,
+        hence the suppress.
+
+        Caveat: if the loop is parked in `await asyncio.to_thread(self._ping)`,
+        cancelling abandons the await but cannot interrupt the worker thread —
+        it runs until the blocking HTTP call returns, bounded by the read
+        timeout on _client.
+        """
         if self._monitor_task and not self._monitor_task.done():
             self._monitor_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._monitor_task
 
     async def _monitor_loop(self) -> None:
         """
