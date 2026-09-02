@@ -34,8 +34,17 @@ class SuryaEngine(BaseOCREngine):
 
     def _ensure_ready(self) -> None:
         if self._manager is None:
-            self._manager = SuryaInferenceManager()  # auto-spawns vllm or llama-server
+            self._manager = SuryaInferenceManager()
+            # Surya creates its inference manager lazily.  Starting it here
+            # means an API startup check can fail fast when WSL is missing its
+            # backend (llama-server on CPU, or vLLM/Docker on CUDA), instead
+            # of making the first uploaded document appear to hang.
+            self._manager.start()
             self._recognizer = RecognitionPredictor(self._manager)
+
+    def warm_up(self) -> None:
+        """Start and validate Surya's inference backend without processing a file."""
+        self._ensure_ready()
 
     def run(self, images: List[Image.Image]) -> List[PageResult]:
         self._ensure_ready()

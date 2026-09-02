@@ -1,0 +1,14 @@
+.git
+.venv
+**/.venv
+**/.venv-windows
+**/surya-env
+**/node_modules
+**/__pycache__
+document_processing
+field_mapping_poc
+gateway
+frontend
+scripts
+docs
+*.log

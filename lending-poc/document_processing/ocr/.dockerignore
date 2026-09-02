@@ -1,0 +1,10 @@
+__pycache__
+*.pyc
+.venv
+.venv-windows
+surya-env
+.env
+.git
+extraction_output
+*.stdout.log
+*.stderr.log

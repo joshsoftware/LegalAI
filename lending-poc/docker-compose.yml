@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-lending_poc}
     ports:
-      - "${POSTGRES_HOST_PORT:-55432}:5432"
+      - "${POSTGRES_HOST_PORT:-55439}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -32,5 +32,194 @@ services:
       db:
         condition: service_healthy
 
+  # Ollama's own image already auto-detects CUDA at runtime and falls back
+  # to CPU on its own — no custom build needed here, just the same cpu/gpu
+  # profile split used for surya-inference/ocr below, so GPU access is only
+  # requested when COMPOSE_PROFILES=gpu.
+  ollama:
+    &ollama
+    image: ollama/ollama:latest
+    profiles: ["cpu"]
+    ports:
+      - "11434:11434"
+    environment:
+      # Keep the model resident once loaded instead of unloading after the
+      # default 5m idle timeout — cold-loading this model takes 2+ minutes,
+      # which otherwise blows past callers' request timeouts on every call
+      # after a short idle gap.
+      OLLAMA_KEEP_ALIVE: -1
+    volumes:
+      - ollama_models:/root/.ollama
+
+  ollama-gpu:
+    <<: *ollama
+    profiles: ["gpu"]
+    networks:
+      default:
+        aliases:
+          - ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  field_mapping:
+    build: ./field_mapping_poc
+    command: uvicorn api:app --host 0.0.0.0 --port 8002 --reload
+    ports:
+      - "8002:8002"
+    environment:
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e4b-it-qat}
+      # Cold model load alone can take 2+ minutes; give the first call after
+      # an idle gap enough headroom instead of timing out mid-load.
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-300}
+    volumes:
+      - ./field_mapping_poc:/app
+    depends_on:
+      ollama:
+        condition: service_started
+        required: false
+      ollama-gpu:
+        condition: service_started
+        required: false
+
+  translation:
+    build: ./document_processing/translation
+    command: uvicorn api_server:app --host 0.0.0.0 --port 8001 --reload
+    ports:
+      - "8001:8001"
+    environment:
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e4b-it-qat}
+    volumes:
+      - ./document_processing/translation:/app
+    depends_on:
+      ollama:
+        condition: service_started
+        required: false
+      ollama-gpu:
+        condition: service_started
+        required: false
+
+  # surya-inference and ocr each come in a "cpu" and "gpu" variant, selected
+  # via COMPOSE_PROFILES in .env (defaults to "cpu" so plain `docker compose
+  # up` always works). Both variants of a pair share a network alias so
+  # downstream services (SURYA_INFERENCE_URL, OCR_BASE_URL) don't need to
+  # know which one is active. See document_processing/ocr/README.md for GPU
+  # prerequisites (NVIDIA Container Toolkit / WSL GPU passthrough).
+  surya-inference:
+    &surya-inference
+    build: ./surya-inference
+    profiles: ["cpu"]
+    ports:
+      - "8500:8000"
+    environment:
+      SURYA_INFERENCE_PARALLEL: ${SURYA_INFERENCE_PARALLEL:-4}
+      SURYA_INFERENCE_CTX_SIZE: ${SURYA_INFERENCE_CTX_SIZE:-49152}
+    volumes:
+      - surya_models:/models
+
+  surya-inference-gpu:
+    <<: *surya-inference
+    profiles: ["gpu"]
+    build:
+      context: ./surya-inference
+      args:
+        BASE_IMAGE: nvidia/cuda:12.4.1-devel-ubuntu22.04
+        RUNTIME_IMAGE: nvidia/cuda:12.4.1-runtime-ubuntu22.04
+        GGML_CUDA: "ON"
+    networks:
+      default:
+        aliases:
+          - surya-inference
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  ocr:
+    &ocr
+    build: ./document_processing/ocr
+    profiles: ["cpu"]
+    command: uvicorn api:app --host 0.0.0.0 --port 8010 --reload
+    ports:
+      - "8010:8010"
+    environment:
+      SURYA_INFERENCE_URL: http://surya-inference:8000/v1
+      SURYA_INFERENCE_AUTOSTART: "false"
+    volumes:
+      - ./document_processing/ocr:/app
+    depends_on:
+      surya-inference:
+        condition: service_started
+        required: false
+      surya-inference-gpu:
+        condition: service_started
+        required: false
+
+  ocr-gpu:
+    <<: *ocr
+    profiles: ["gpu"]
+    build:
+      context: ./document_processing/ocr
+      args:
+        GPU: "1"
+    networks:
+      default:
+        aliases:
+          - ocr
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  gateway:
+    build: ./gateway
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8080:8000"
+    environment:
+      FIELD_MAPPING_BASE_URL: http://field_mapping:8002
+      OCR_BASE_URL: http://ocr:8010
+      TRANSLATION_BASE_URL: http://translation:8001
+    volumes:
+      - ./gateway:/app
+    depends_on:
+      field_mapping:
+        condition: service_started
+      ocr:
+        condition: service_started
+        required: false
+      ocr-gpu:
+        condition: service_started
+        required: false
+      translation:
+        condition: service_started
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    environment:
+      # Browser-facing: must be host-reachable (localhost + published port),
+      # not a Docker-internal service name.
+      VITE_API_BASE_URL: http://localhost:8080
+      VITE_TRANSLATION_API_BASE_URL: http://localhost:8080
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
 volumes:
   pgdata:
+  ollama_models:
+  surya_models:

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class OllamaConfig:
     host: str = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-    model: str = os.getenv("OLLAMA_MODEL", "gemma4:e4b")
+    model: str = os.getenv("OLLAMA_MODEL", "gemma4:e4b-it-qat")
     temperature: float = float(os.getenv("OLLAMA_TEMPERATURE", "0.0"))
     num_ctx: int = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
     request_timeout: int = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120"))
