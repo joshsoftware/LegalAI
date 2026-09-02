@@ -15,7 +15,8 @@ Endpoints:
 import asyncio
 import json
 import logging
-from typing import Any, Dict
+from contextlib import asynccontextmanager
+from typing import Any, Dict, Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.concurrency import run_in_threadpool
@@ -26,15 +27,25 @@ from core.mapper import FieldMapper
 from core.ollama_client import OllamaClientError
 from core.response_parser import ResponseParseError
 
+# Initialize field mapper (reused across requests for efficiency)
+mapper = FieldMapper()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Start/stop the background Ollama-reachability monitor backing /health."""
+    await mapper.client.start_monitoring()
+    yield
+    await mapper.client.stop_monitoring()
+
+
 # Initialize FastAPI app
 app = FastAPI(
     title="Field Mapping API",
     description="Map OCR text to a target JSON schema using LLM.",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
-
-# Initialize field mapper (reused across requests for efficiency)
-mapper = FieldMapper()
 
 # The local Ollama model serves one generation at a time anyway; serialize
 # calls through the shared client rather than letting them race across
@@ -47,13 +58,45 @@ class MapRequest(BaseModel):
     ocr_text: str = Field(..., description="Raw OCR text to extract information from")
     json_format: str = Field(..., description="Target JSON schema as a string")
 
-@app.get("/health")
-async def health_check() -> Dict[str, str]:
-    """Health check endpoint to verify API is running."""
-    return {
-        "status": "healthy",
-        "service": "Field Mapping API"
-    }
+
+HealthStatus = Literal["ok", "initializing", "unreachable"]
+
+STATUS_DETAIL = {
+    "unreachable": "Ollama is unreachable.",
+    "initializing": "Ollama reachable — waiting for the model to respond.",
+    "ok": "Model is loaded and responding.",
+}
+
+# Retry-After hint sent with the 503 in /map when Ollama is unreachable.
+# Deliberately not OLLAMA_HEALTH_RETRY_SECONDS (5s) — that's how fast our own
+# monitor re-probes, but telling clients to retry that fast just hammers a
+# service that is genuinely down.
+UNAVAILABLE_RETRY_AFTER_SECONDS = 30
+
+
+class HealthResponse(BaseModel):
+    status: HealthStatus = Field(
+        description=(
+            "'unreachable' if Ollama isn't responding, 'initializing' if it's "
+            "reachable but the model hasn't responded yet (e.g. cold-loading), "
+            "'ok' if the model is loaded and responding."
+        )
+    )
+    detail: str = Field(description="Human-readable explanation of `status`.")
+    service: str = Field(description="This service's name.")
+    model: str = Field(description="Model name currently configured.")
+
+
+@app.get("/health", response_model=HealthResponse)
+async def health_check() -> HealthResponse:
+    """Health check endpoint — reflects live Ollama reachability, not just process liveness."""
+    status = mapper.client.health_status()
+    return HealthResponse(
+        status=status,
+        detail=STATUS_DETAIL[status],
+        service="Field Mapping API",
+        model=mapper.client.model,
+    )
 
 @app.post("/map")
 async def map_fields(request: MapRequest) -> Dict[str, Any]:
@@ -74,7 +117,25 @@ async def map_fields(request: MapRequest) -> Dict[str, Any]:
             status_code=400,
             detail=f"Invalid JSON format provided: {str(e)}"
         )
-    
+
+    # Fail fast when Ollama is known-down, before queueing on _map_lock —
+    # otherwise concurrent callers pile up serially behind a doomed request.
+    #
+    # Deliberately `== "unreachable"`, NOT `!= "ok"`: "initializing" means the
+    # server is up but the model hasn't answered yet — i.e. a cold load is in
+    # progress — and those requests DO succeed if allowed to wait (~3min).
+    # Rejecting them would turn working-but-slow into a hard failure.
+    #
+    # This is a fast path, not a guarantee: status can be up to
+    # OLLAMA_HEALTH_RECHECK_SECONDS stale, and Ollama can wedge mid-call, so
+    # the timeout/retry handling below still has to stand on its own.
+    if mapper.client.health_status() == "unreachable":
+        raise HTTPException(
+            status_code=503,
+            detail=STATUS_DETAIL["unreachable"],
+            headers={"Retry-After": str(UNAVAILABLE_RETRY_AFTER_SECONDS)},
+        )
+
     try:
         # Runs in a worker thread so this synchronous LLM call doesn't block
         # the event loop, serialized since the local model only serves one
