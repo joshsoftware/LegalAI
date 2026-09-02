@@ -6,6 +6,8 @@
 # via SURYA_INFERENCE_URL instead of spawning its own.
 set -e
 
+mkdir -p "$MODEL_DIR"
+
 MODEL_PATH="${MODEL_DIR}/${SURYA_GGUF_MODEL_FILE}"
 MMPROJ_PATH="${MODEL_DIR}/${SURYA_GGUF_MMPROJ_FILE}"
 
