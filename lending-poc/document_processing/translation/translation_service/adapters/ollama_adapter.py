@@ -28,6 +28,7 @@ pinned status at whatever it last was. See _ping() and _monitor_loop() below.
 
 import asyncio
 import contextlib
+import time
 
 import httpx
 import ollama
@@ -193,7 +194,13 @@ class OllamaAdapter(ModelAdapter):
         indefinite retry once a genuine outage looks sustained, and keeps
         re-confirming "ok" so a later outage is eventually reflected too.
         """
-        consecutive_failures = 0
+        # Counts _ping() failures only. The reachability probe below keeps its
+        # own (fast, non-escalating) cadence — see there for why.
+        ping_failures = 0
+        # Monotonic timestamp of the last successful _ping(), so the expensive
+        # model ping keeps its slow cadence while the loop itself ticks fast.
+        # See the "ping due?" check below.
+        last_ok_ping = 0.0
         while True:
             # Two-phase probe, so each status means exactly one thing and
             # never flaps between them while a probe is in flight:
@@ -207,9 +214,28 @@ class OllamaAdapter(ModelAdapter):
             try:
                 await asyncio.to_thread(self._probe_reachable)
             except Exception as exc:
-                consecutive_failures += 1
+                # Deliberately NOT _backoff(). That escalates to
+                # OLLAMA_HEALTH_BACKOFF_SECONDS, which is sized for the
+                # expensive _ping() below — a real model call that can trigger
+                # a load. This probe is a TCP connect to a local port that
+                # fails instantly on connection-refused, so polling it at the
+                # fast interval indefinitely costs nothing.
+                #
+                # Sharing one escalating backoff between the two meant a
+                # stopped Ollama dragged this cheap probe down to the ping's
+                # cadence, so the monitor slept through Ollama coming back and
+                # /health kept reporting "unreachable" for up to the backoff
+                # window after it was already serving.
+                #
+                # Logged on transition only: at this cadence, per-attempt
+                # logging would spam a line every few seconds through an outage.
+                if self._status != "unreachable":
+                    print(f"[OllamaAdapter] monitor: Ollama unreachable ({exc})")
                 self._status = "unreachable"
-                await self._backoff(consecutive_failures, exc)
+                # A down server says nothing about the model's health, so these
+                # failures must not feed the ping path's escalation.
+                ping_failures = 0
+                await asyncio.sleep(OLLAMA_HEALTH_RETRY_SECONDS)
                 continue
 
             # Server is up. Anything not yet confirmed working is a model that
@@ -219,25 +245,51 @@ class OllamaAdapter(ModelAdapter):
             if self._status != "ok":
                 self._status = "initializing"
 
+            # Is the expensive ping due? While healthy, re-confirming the model
+            # every OLLAMA_HEALTH_RECHECK_SECONDS is plenty — but that interval
+            # must not also gate the cheap probe above. Sleeping it wholesale
+            # (what this loop used to do) left the monitor parked for up to a
+            # full recheck interval, so a stopped Ollama kept reporting "ok"
+            # that whole time and the /translate gate waved requests through.
+            #
+            # Ticking at the fast interval instead catches a stopped Ollama
+            # within OLLAMA_HEALTH_RETRY_SECONDS, while the model itself is
+            # still only pinged on the slow cadence.
+            #
+            # Only applies once we're "ok": while "initializing", every
+            # iteration should keep trying to confirm the model is up. That
+            # isn't a busy loop — a ping during a cold load blocks until the
+            # load finishes.
+            if self._status == "ok" and (
+                time.monotonic() - last_ok_ping < OLLAMA_HEALTH_RECHECK_SECONDS
+            ):
+                await asyncio.sleep(OLLAMA_HEALTH_RETRY_SECONDS)
+                continue
+
             try:
                 await asyncio.to_thread(self._ping)
                 self._status = "ok"
-                consecutive_failures = 0
-                await asyncio.sleep(OLLAMA_HEALTH_RECHECK_SECONDS)
+                last_ok_ping = time.monotonic()
+                ping_failures = 0
+                await asyncio.sleep(OLLAMA_HEALTH_RETRY_SECONDS)
             except Exception as exc:
-                consecutive_failures += 1
+                ping_failures += 1
                 self._status = "unreachable"
-                await self._backoff(consecutive_failures, exc)
+                await self._backoff(ping_failures, exc)
 
-    async def _backoff(self, consecutive_failures: int, exc: Exception) -> None:
+    async def _backoff(self, ping_failures: int, exc: Exception) -> None:
         """
-        Sleep between failed probes: retry quickly at first, then slow down
-        once an outage looks sustained, retrying indefinitely so the service
-        self-heals without a restart.
+        Sleep between failed _ping() attempts: retry quickly at first, then
+        slow down once an outage looks sustained, retrying indefinitely so the
+        service self-heals without a restart.
+
+        Only the ping path uses this. The reachability probe stays on the fast
+        interval forever — see _monitor_loop() for why the two must not share
+        an escalating backoff.
         """
-        if consecutive_failures <= OLLAMA_HEALTH_MAX_FAST_RETRIES:
+        if ping_failures <= OLLAMA_HEALTH_MAX_FAST_RETRIES:
             delay = OLLAMA_HEALTH_RETRY_SECONDS
         else:
             delay = OLLAMA_HEALTH_BACKOFF_SECONDS
-        print(f"[OllamaAdapter] monitor: {exc}; retry #{consecutive_failures} in {delay}s")
+        print(f"[OllamaAdapter] monitor: ping failed: {exc}; retry #{ping_failures} in {delay}s")
         await asyncio.sleep(delay)
