@@ -13,8 +13,9 @@ export interface MapFieldsInput {
 }
 
 // The backend calls out to a local LLM (Ollama) per request, which can run
-// well past the client's default 30s timeout under load or for longer text.
-const MAP_FIELDS_TIMEOUT_MS = 5 * 60 * 1000
+// well past the client's default timeout under load or for longer text.
+// TEMP(slow-host testing): raised from 5min to 30min. Revert before merging.
+const MAP_FIELDS_TIMEOUT_MS = 30 * 60 * 1000
 
 /**
  * Calls the field-mapping API for a single document. The backend

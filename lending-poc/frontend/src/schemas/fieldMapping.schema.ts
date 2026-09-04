@@ -64,7 +64,9 @@ export const bankStatementTemplateSchema = z.object({
     z.object({
       transaction_date: z.string(),
       description: z.string(),
-      amount: z.null(),
+      // A hint string, not a null placeholder — the model needs to be told
+      // this is a plain number.
+      amount: z.string(),
       currency: z.string(),
       direction: z.string(),
       balance: z.null(),

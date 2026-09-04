@@ -26,13 +26,14 @@ class OllamaConfig:
     #   - Must exceed a real cold load (~215s measured on CPU). Firing
     #     mid-load makes Ollama abort it, so the next request reloads from
     #     scratch — that cascade was the original /map incident.
-    #   - Must not run too far past the gateway's own 300s proxy timeout.
+    #   - Must not run too far past the gateway's own proxy timeout.
     #     Once that fires nobody is waiting for the answer, but this call
     #     still holds _map_lock, blocking every other /map caller.
-    # 600s is ~3x the observed load with ~5min of post-abandonment lock hold.
     # Raise it (env) for slower hosts or larger models, where a legitimate
     # load could otherwise cross it.
-    request_timeout: int = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "600"))
+    # TEMP(slow-host testing): raised from 600s to 1800s, matching the
+    # gateway's raised proxy timeout. Revert before merging.
+    request_timeout: int = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "1800"))
     max_retries: int = int(os.getenv("OLLAMA_MAX_RETRIES", "2"))
 
 
