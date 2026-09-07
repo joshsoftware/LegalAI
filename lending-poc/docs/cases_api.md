@@ -118,7 +118,58 @@ Notes:
 
 | Status | When |
 |---|---|
-| `400 Bad Request` | The request body fails semantic parsing in `parse_case` (e.g. malformed/missing required fields inside `extracted_fields`). |
+| `400 Bad Request` | One or more values inside `extracted_fields` could not be parsed. |
 | `422 Unprocessable Entity` | The request body fails schema validation (wrong types, missing `applicant_ref`/`documents`). |
+
+#### Value formats
+
+The formats shown above are canonical, but the endpoint is **tolerant on input** —
+values usually originate from an LLM reading a scanned document, so they arrive
+written however the document printed them. `app/services/value_normalization.py`
+accepts, among others:
+
+| Field | Also accepted |
+|---|---|
+| dates | `14-03-1995`, `14/03/1995`, `2026/03/14`, `14 March 1995`, `14-Mar-1995` |
+| `salary_month` | a full date (truncated to its month), `03/2026`, `March 2026`, `Aug 2026` |
+| amounts | `"75,000"`, `"1,23,456"`, `"Rs. 45,000/-"`, `"₹75,000"`, `"$ 4,500.00"`, `"(18,000)"`, `"18,000 Dr"` |
+
+Ambiguous day/month ordering (e.g. `03/04/2026`, where both parts could be a
+month) resolves **day-first**, per `AMBIGUOUS_DATE_ORDER`. Two-digit years are
+rejected rather than guessed at.
+
+A value that is *absent* (missing key, `null`, or blank) is fine — the pipeline
+reports it as a missing field. A value that is *present but unparseable* is
+never silently dropped, because a dropped value would surface downstream as a
+confident, wrong decision. Instead every such value is collected and returned
+together:
+
+```json
+{
+  "detail": {
+    "error": "invalid_field_format",
+    "message": "2 field value(s) could not be parsed.",
+    "fields": [
+      {
+        "document": "AADHAAR",
+        "field": "date_of_birth",
+        "value": "14-03-95",
+        "expected": "a date such as 1995-03-14, 14-03-1995, 14/03/1995 or '14 March 1995'",
+        "reason": "ambiguous_two_digit_year"
+      },
+      {
+        "document": "BANK_STATEMENT",
+        "field": "transactions[1].amount",
+        "value": "abc",
+        "expected": "a number such as 75000, '75,000' or 'Rs. 75,000.00'",
+        "reason": "unrecognised_amount_format"
+      }
+    ]
+  }
+}
+```
+
+Structural problems that are not per-field format failures still return a plain
+string `detail`, so clients should handle both shapes.
 
 If any of `AADHAAR`, `PAN`, `SALARY_SLIP`, `BANK_STATEMENT` is missing from `documents`, the pipeline still returns `200 OK` with `decision: "FAIL"` and reasons like `MISSING_DOCUMENT:PAN` — this is a business decision, not an HTTP error.
