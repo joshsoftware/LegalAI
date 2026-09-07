@@ -37,6 +37,66 @@ function asArray(value: unknown): unknown[] {
 }
 
 /**
+ * Truncates a date to the `YYYY-MM` the /cases contract expects for
+ * salary_month. The field-mapping result supplies a full date (period.from),
+ * which is a different unit entirely.
+ *
+ * A value we don't recognise is passed through unchanged rather than dropped:
+ * the backend normalizer handles more formats than this does, and turning an
+ * unrecognised value into `undefined` would silently read as "no salary month"
+ * instead of raising.
+ */
+function toYearMonth(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  const match = /^(\d{4})-(\d{2})/.exec(value.trim())
+  return match ? `${match[1]}-${match[2]}` : value
+}
+
+const DEBIT_TOKENS = ['debited', 'debit', 'withdrawal', 'withdrawn', 'dr']
+const CREDIT_TOKENS = ['credited', 'credit', 'deposit', 'cr']
+
+/**
+ * Reads the field-mapping `direction` field.
+ *
+ * The /cases contract encodes credit vs debit as the *sign* of the amount
+ * (business_validation treats `amount > 0` as the only credit test), but field
+ * mapping reports it as a separate word — so it has to be folded in here or
+ * the information never reaches the backend at all.
+ *
+ * Returns undefined when direction is unknown OR self-contradictory. That
+ * second case is not hypothetical: 'Credited/Debited' is the literal
+ * placeholder in FIELD_MAPPING_TEMPLATE, and a model that can't determine
+ * direction tends to echo it back verbatim. Matching it as a debit would flip
+ * every such transaction negative and make the backend drop it silently.
+ */
+function directionOf(raw: unknown): 'credit' | 'debit' | undefined {
+  if (typeof raw !== 'string') return undefined
+  const text = raw.toLowerCase()
+  const isDebit = DEBIT_TOKENS.some((t) => text.includes(t))
+  const isCredit = CREDIT_TOKENS.some((t) => text.includes(t))
+  if (isDebit === isCredit) return undefined // neither, or the placeholder
+  return isDebit ? 'debit' : 'credit'
+}
+
+/**
+ * Applies `direction` as the sign of the amount. Idempotent, so an amount the
+ * model already signed is not negated twice. With no direction the amount is
+ * left exactly as-is — never assume "credit", since that is the assumption
+ * that made every debit look like salary.
+ */
+function applyDirection(
+  amount: number | string | undefined,
+  direction: 'credit' | 'debit' | undefined
+): number | string | undefined {
+  if (amount === undefined || direction === undefined) return amount
+  if (typeof amount === 'number') {
+    return direction === 'debit' ? -Math.abs(amount) : Math.abs(amount)
+  }
+  const bare = amount.trim().replace(/^[+-]/, '')
+  return direction === 'debit' ? `-${bare}` : bare
+}
+
+/**
  * Maps the (currently unconfirmed) per-document field-mapping API results
  * into the CaseCreateRequest shape expected by POST /cases. Field mapping
  * runs once per document (see useFieldMapping), so this reads each
@@ -70,7 +130,8 @@ export function mapFieldMappingResultToCaseRequest(
       extracted_fields: {
         name: asString(aadhaar.name),
         address: asString(aadhaar.address),
-        aadhaar_number: asString(aadhaar.aadhaar_number),
+        // May arrive unquoted from field mapping, being all digits.
+        aadhaar_number: asNumberOrString(aadhaar.aadhaar_number),
         date_of_birth: asString(aadhaar.date_of_birth),
       },
       source_file_ref: asString(aadhaar.source_file_ref),
@@ -105,7 +166,10 @@ export function mapFieldMappingResultToCaseRequest(
             name: asString(employee.name),
             employer_name: asString(employer.name),
             net_salary: asNumberOrString(netSalary.amount),
-            salary_month: asString(period.from) ?? asString(documentMetadata.document_date),
+            // period.from is a full date; /cases expects a YYYY-MM month.
+            salary_month: toYearMonth(
+              asString(period.from) ?? asString(documentMetadata.document_date)
+            ),
           },
           source_file_ref: asString(salarySlip.source_file_ref),
         },
@@ -121,7 +185,9 @@ export function mapFieldMappingResultToCaseRequest(
       const t = asRecord(txn)
       return {
         narration: asString(t.description) ?? asString(t.narration),
-        amount: typeof t.amount === 'number' ? t.amount : undefined,
+        // Forward string amounts ("75,000") for the backend to normalize
+        // rather than dropping them, and fold `direction` into the sign.
+        amount: applyDirection(asNumberOrString(t.amount), directionOf(t.direction)),
         date: asString(t.transaction_date) ?? asString(t.date),
       }
     })

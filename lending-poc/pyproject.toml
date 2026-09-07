@@ -28,3 +28,9 @@ dev = [
 [build-system]
 requires = ["setuptools>=75.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The project is run from the repo root rather than pip-installed, so `import
+# app` needs the root on sys.path.
+pythonpath = ["."]

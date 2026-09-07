@@ -1,7 +1,7 @@
 {
   "fullName": "string",
   "documentNumber": "string",
-  "dateOfBirth": "date (DD-MM-YYYY)",
+  "dateOfBirth": "date (YYYY-MM-DD)",
   "gender": "string",
   "address": {
     "line1": "string",

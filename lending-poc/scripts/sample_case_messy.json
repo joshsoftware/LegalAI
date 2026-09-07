@@ -1,0 +1,96 @@
+{
+  "applicant_ref": "APP-MESSY-0001",
+  "documents": [
+    {
+      "doc_type": "AADHAAR",
+      "extracted_fields": {
+        "name": "Arjun Ramesh Iyer",
+        "address": "Flat 702, Silver Oak Residency, Viman Nagar, Pune, Maharashtra 411014",
+        "aadhaar_number": "XXXX XXXX 7841",
+        "date_of_birth": "19/08/1994"
+      },
+      "source_file_ref": "s3://kyc-docs/APP-MESSY-0001/aadhaar_front.pdf"
+    },
+    {
+      "doc_type": "PAN",
+      "extracted_fields": {
+        "name": "Arjun R Iyer",
+        "pan_number": "AXKPI2938Q"
+      },
+      "source_file_ref": "s3://kyc-docs/APP-MESSY-0001/pan_card.pdf"
+    },
+    {
+      "doc_type": "ADDRESS_PROOF",
+      "extracted_fields": {
+        "address": "Flat No. 702, Silver Oak Residency, Viman Nagar, Pune, MH 411014"
+      },
+      "source_file_ref": "s3://kyc-docs/APP-MESSY-0001/electricity_bill.pdf"
+    },
+    {
+      "doc_type": "SALARY_SLIP",
+      "salary_slips": [
+        {
+          "extracted_fields": {
+            "name": "Arjun Ramesh Iyer",
+            "employer_name": "Infosys Limited",
+            "net_salary": "Rs. 88,000",
+            "salary_month": "March 2026"
+          },
+          "source_file_ref": "s3://kyc-docs/APP-MESSY-0001/salary_slip_march.pdf"
+        },
+        {
+          "extracted_fields": {
+            "name": "Arjun Ramesh Iyer",
+            "employer_name": "Infosys Limited",
+            "net_salary": "INR 88,000.00",
+            "salary_month": "2026-04-01"
+          },
+          "source_file_ref": "s3://kyc-docs/APP-MESSY-0001/salary_slip_april.pdf"
+        },
+        {
+          "extracted_fields": {
+            "name": "Arjun Ramesh Iyer",
+            "employer_name": "Infosys Limited",
+            "net_salary": 88000,
+            "salary_month": "May-2026"
+          },
+          "source_file_ref": "s3://kyc-docs/APP-MESSY-0001/salary_slip_may.pdf"
+        }
+      ]
+    },
+    {
+      "doc_type": "BANK_STATEMENT",
+      "extracted_fields": {
+        "name": "Iyer Arjun R",
+        "transactions": [
+          {
+            "narration": "INFOSYS LIMITED SALARY MAR 2026",
+            "amount": "88,000 Cr",
+            "date": "01/04/2026"
+          },
+          {
+            "narration": "HOUSE RENT EMI DEBIT",
+            "amount": "18,000 Dr",
+            "date": "03/04/2026"
+          },
+          {
+            "narration": "INFOSYS LIMITED SALARY APR 2026",
+            "amount": "88,000",
+            "date": "2026-05-01"
+          },
+          {
+            "narration": "UPI MERCHANT PAYMENT",
+            "amount": "(2,450)",
+            "date": "07-05-2026"
+          },
+          {
+            "narration": "INFOSYS LIMITED SALARY MAY 2026",
+            "amount": "Rs. 88,000/-",
+            "date": "01-06-2026"
+          }
+        ]
+      },
+      "source_file_ref": "s3://kyc-docs/APP-MESSY-0001/bank_statement_mar_to_jun.pdf"
+    }
+  ]
+}

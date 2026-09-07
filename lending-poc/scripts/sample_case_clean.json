@@ -1,0 +1,101 @@
+{
+  "applicant_ref": "APP-CLEAN-0001",
+  "documents": [
+    {
+      "doc_type": "AADHAAR",
+      "extracted_fields": {
+        "name": "Arjun Ramesh Iyer",
+        "address": "Flat 702, Silver Oak Residency, Viman Nagar, Pune, Maharashtra 411014",
+        "aadhaar_number": "XXXX XXXX 7841",
+        "date_of_birth": "1994-08-19"
+      },
+      "source_file_ref": "s3://kyc-docs/APP-CLEAN-0001/aadhaar_front.pdf"
+    },
+    {
+      "doc_type": "PAN",
+      "extracted_fields": {
+        "name": "Arjun Ramesh Iyer",
+        "pan_number": "AXKPI2938Q"
+      },
+      "source_file_ref": "s3://kyc-docs/APP-CLEAN-0001/pan_card.pdf"
+    },
+    {
+      "doc_type": "ADDRESS_PROOF",
+      "extracted_fields": {
+        "address": "Flat 702, Silver Oak Residency, Viman Nagar, Pune, Maharashtra 411014"
+      },
+      "source_file_ref": "s3://kyc-docs/APP-CLEAN-0001/electricity_bill.pdf"
+    },
+    {
+      "doc_type": "SALARY_SLIP",
+      "salary_slips": [
+        {
+          "extracted_fields": {
+            "name": "Arjun Ramesh Iyer",
+            "employer_name": "Infosys Limited",
+            "net_salary": 88000,
+            "salary_month": "2026-03"
+          },
+          "source_file_ref": "s3://kyc-docs/APP-CLEAN-0001/salary_slip_march.pdf"
+        },
+        {
+          "extracted_fields": {
+            "name": "Arjun Ramesh Iyer",
+            "employer_name": "Infosys Limited",
+            "net_salary": 88000,
+            "salary_month": "2026-04"
+          },
+          "source_file_ref": "s3://kyc-docs/APP-CLEAN-0001/salary_slip_april.pdf"
+        },
+        {
+          "extracted_fields": {
+            "name": "Arjun Ramesh Iyer",
+            "employer_name": "Infosys Limited",
+            "net_salary": 88000,
+            "salary_month": "2026-05"
+          },
+          "source_file_ref": "s3://kyc-docs/APP-CLEAN-0001/salary_slip_may.pdf"
+        }
+      ]
+    },
+    {
+      "doc_type": "BANK_STATEMENT",
+      "extracted_fields": {
+        "name": "Arjun Ramesh Iyer",
+        "transactions": [
+          {
+            "narration": "INFOSYS LIMITED SALARY MAR",
+            "amount": 88000,
+            "date": "2026-04-01"
+          },
+          {
+            "narration": "HOUSE RENT DEBIT",
+            "amount": -26000,
+            "date": "2026-04-05"
+          },
+          {
+            "narration": "INFOSYS LIMITED SALARY APR",
+            "amount": 88000,
+            "date": "2026-05-01"
+          },
+          {
+            "narration": "ELECTRICITY BILL PAYMENT",
+            "amount": -2150,
+            "date": "2026-05-09"
+          },
+          {
+            "narration": "INFOSYS LIMITED SALARY MAY",
+            "amount": 88000,
+            "date": "2026-06-01"
+          },
+          {
+            "narration": "SWIGGY ORDER PAYMENT",
+            "amount": -540,
+            "date": "2026-06-11"
+          }
+        ]
+      },
+      "source_file_ref": "s3://kyc-docs/APP-CLEAN-0001/bank_statement_mar_to_jun.pdf"
+    }
+  ]
+}
