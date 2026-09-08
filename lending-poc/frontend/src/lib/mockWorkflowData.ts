@@ -164,7 +164,7 @@ export const MOCK_VALIDATION_RESULT: CaseCreateResponse = {
   case_id: 'a242f1d0-fd32-4f46-8864-8d4ac23cdcbf',
   applicant_ref: 'APP-2026-09194',
   decision: 'PASS',
-  overall_score: 98.0,
+  overall_score: 97.8,
   reasons: ['score_meets_pass_threshold'],
   validation_results: [
     {
@@ -176,17 +176,6 @@ export const MOCK_VALIDATION_RESULT: CaseCreateResponse = {
         source_text: 'SNEHA SUNIL LOKHANDE',
         target_text: 'SNEHA SUNIL LOKHANDE',
         match_type: 'FUZZY',
-      },
-    },
-    {
-      check_type: 'ADDRESS',
-      passed: true,
-      score: 100.0,
-      document_id: 'AADHAAR',
-      evidence: {
-        source_text: 'Flat 204, Green Heights, Baner, Pune, Maharashtra 411045',
-        target_text: 'Flat 204, Green Heights, Baner, Pune, Maharashtra 411045',
-        match_type: 'EMBEDDING',
       },
     },
     {

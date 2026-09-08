@@ -33,13 +33,6 @@ Adds the `POST /cases` endpoint, the first user-facing entry point into the lend
       "source_file_ref": "s3://kyc-docs/APP-2026-00123/pan_card.pdf"
     },
     {
-      "doc_type": "ADDRESS_PROOF",
-      "extracted_fields": {
-        "address": "Apartment 204, Green Heights, Baner, Pune, MH 411045"
-      },
-      "source_file_ref": "s3://kyc-docs/APP-2026-00123/address_proof.pdf"
-    },
-    {
       "doc_type": "SALARY_SLIP",
       "salary_slips": [
         {
@@ -72,7 +65,7 @@ Notes:
 - `applicant_ref` and `documents` are required.
 - Every document needs `doc_type` and `extracted_fields`; `source_file_ref` is optional.
 - `SALARY_SLIP` is the only `doc_type` that carries a `salary_slips` array instead of a flat `extracted_fields` — a case can include multiple salary slips (one per month).
-- Required document types for a case to proceed: `AADHAAR`, `PAN`, `SALARY_SLIP`, `BANK_STATEMENT`. `ADDRESS_PROOF` is optional (used as an address fallback).
+- Accepted document types are exactly `AADHAAR`, `PAN`, `SALARY_SLIP`, `BANK_STATEMENT`, and all four are required for a case to proceed. `documents` is a discriminated union on `doc_type`, so any other value (including the previously accepted `ADDRESS_PROOF`) is rejected with `422 union_tag_invalid`.
 
 ### Response `200 OK`
 

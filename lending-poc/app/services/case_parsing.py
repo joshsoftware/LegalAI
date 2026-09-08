@@ -21,7 +21,6 @@ from typing import Any, Callable
 
 from app.services.dto import (
     AadhaarDoc,
-    AddressProofDoc,
     BankStatementDoc,
     BankTransaction,
     CaseInput,
@@ -145,13 +144,6 @@ def parse_case(payload: dict) -> CaseInput:
             case.pan = PanDoc(
                 name=_get(fields, "name"),
                 pan_number=_text(_get(fields, "pan_number")),
-                source_file_ref=doc.get("source_file_ref"),
-            )
-
-        elif doc_type == "ADDRESS_PROOF":
-            fields = doc["extracted_fields"]
-            case.address_proof = AddressProofDoc(
-                address=_get(fields, "address"),
                 source_file_ref=doc.get("source_file_ref"),
             )
 

@@ -15,7 +15,7 @@ from enum import Enum
 class DocType(str, Enum):
     AADHAAR = "AADHAAR"
     PAN = "PAN"
-    ADDRESS_PROOF = "ADDRESS_PROOF"
+    ADDRESS_PROOF = "ADDRESS_PROOF"  # retired; mirrors the DB enum, see db/models/enums.py
     SALARY_SLIP = "SALARY_SLIP"
     BANK_STATEMENT = "BANK_STATEMENT"
 
@@ -58,13 +58,6 @@ class PanDoc:
 
 
 @dataclass
-class AddressProofDoc:
-    address: str | None = None
-    source_file_ref: str | None = None
-    doc_id: str = "ADDRESS_PROOF"
-
-
-@dataclass
 class SalarySlipDoc:
     doc_id: str
     employer_name: str | None = None
@@ -94,7 +87,6 @@ class CaseInput:
     applicant_ref: str
     aadhaar: AadhaarDoc | None = None
     pan: PanDoc | None = None
-    address_proof: AddressProofDoc | None = None
     salary_slips: list[SalarySlipDoc] = field(default_factory=list)
     bank_statement: BankStatementDoc | None = None
 
@@ -104,8 +96,6 @@ class CaseInput:
             present.add(DocType.AADHAAR.value)
         if self.pan:
             present.add(DocType.PAN.value)
-        if self.address_proof:
-            present.add(DocType.ADDRESS_PROOF.value)
         if self.salary_slips:
             present.add(DocType.SALARY_SLIP.value)
         if self.bank_statement:
