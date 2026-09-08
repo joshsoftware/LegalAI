@@ -1,10 +1,17 @@
-"""Checks every document agrees with the Golden Record: name, address,
-Aadhaar, PAN, DOB. Also enforces that mandatory identity fields exist on
-the Golden Record at all, regardless of why they're missing.
+"""Checks every document agrees with the Golden Record: name, Aadhaar,
+PAN, DOB. Also enforces that mandatory identity fields exist on the
+Golden Record at all, regardless of why they're missing.
+
+Address is deliberately NOT checked here. golden.address is copied verbatim
+from AADHAAR -- the only document that carries an address -- so comparing a
+document's address back against the Golden Record compared a value with
+itself and always scored 100. A check that cannot fail isn't a check --
+worse, since compute_score renormalizes by observed weight, a guaranteed
+100 pulled borderline cases up toward the pass threshold. Address is still
+resolved and stored on the Golden Record; it is simply not scored.
 """
 
 from app.matching import exact, fuzzy
-from app.matching.embeddings import address_similarity
 from app.services import validation_config as cfg
 from app.services.dto import CaseInput, CheckType, GoldenRecord, ValidationResult
 
@@ -17,6 +24,8 @@ MANDATORY_GOLDEN_FIELDS = {
 
 
 def check_mandatory_presence(golden: GoldenRecord) -> list[ValidationResult]:
+    '''Checks that the Golden Record itself has a name, Aadhaar number, PAN number, and DOB'''
+    
     results = []
     for check_type, field_name in MANDATORY_GOLDEN_FIELDS.items():
         if getattr(golden, field_name) is None:
@@ -46,7 +55,6 @@ def _exact_result_to_validation(check_type: CheckType, outcome, document_id: str
 def validate_document_against_golden(
     document_id: str,
     doc_name: str | None,
-    doc_address: str | None,
     doc_aadhaar: str | None,
     doc_pan: str | None,
     doc_dob,
@@ -67,20 +75,6 @@ def validate_document_against_golden(
             )
         )
 
-    if doc_address is not None and golden.address is not None:
-        similarity = address_similarity(golden.address, doc_address)
-        score = similarity * 100.0
-        passed = similarity >= cfg.ADDRESS_SIMILARITY_THRESHOLD
-        results.append(
-            ValidationResult(
-                check_type=CheckType.ADDRESS,
-                passed=passed,
-                score=score,
-                document_id=document_id,
-                failure_reason=None if passed else "address_below_threshold",
-            )
-        )
-
     if doc_aadhaar is not None:
         outcome = exact.aadhaar_match(golden.aadhaar_number, doc_aadhaar)
         results.append(_exact_result_to_validation(CheckType.AADHAAR, outcome, document_id))
@@ -97,6 +91,13 @@ def validate_document_against_golden(
 
 
 def run_identity_validation(case: CaseInput, golden: GoldenRecord) -> list[ValidationResult]:
+    # Stage 3: does every document agree with the Golden Record?
+    # 1) check_mandatory_presence: Golden Record itself must have name/Aadhaar/PAN/DOB,
+    #    else that check type is an automatic hard failure (score 0.0).
+    # 2) For each present document, validate_document_against_golden compares its fields
+    #    against the Golden Record (fuzzy name, exact Aadhaar/PAN/DOB).
+    # All ValidationResults (pass/fail + score + reason) are flattened into one list.
+    
     results: list[ValidationResult] = []
     results.extend(check_mandatory_presence(golden))
 
@@ -105,7 +106,6 @@ def run_identity_validation(case: CaseInput, golden: GoldenRecord) -> list[Valid
             validate_document_against_golden(
                 document_id=case.aadhaar.doc_id,
                 doc_name=case.aadhaar.name,
-                doc_address=case.aadhaar.address,
                 doc_aadhaar=case.aadhaar.aadhaar_number,
                 doc_pan=None,
                 doc_dob=case.aadhaar.date_of_birth,
@@ -118,22 +118,8 @@ def run_identity_validation(case: CaseInput, golden: GoldenRecord) -> list[Valid
             validate_document_against_golden(
                 document_id=case.pan.doc_id,
                 doc_name=case.pan.name,
-                doc_address=None,
                 doc_aadhaar=None,
                 doc_pan=case.pan.pan_number,
-                doc_dob=None,
-                golden=golden,
-            )
-        )
-
-    if case.address_proof:
-        results.extend(
-            validate_document_against_golden(
-                document_id=case.address_proof.doc_id,
-                doc_name=None,
-                doc_address=case.address_proof.address,
-                doc_aadhaar=None,
-                doc_pan=None,
                 doc_dob=None,
                 golden=golden,
             )
@@ -144,7 +130,6 @@ def run_identity_validation(case: CaseInput, golden: GoldenRecord) -> list[Valid
             validate_document_against_golden(
                 document_id=slip.doc_id,
                 doc_name=slip.name,
-                doc_address=None,
                 doc_aadhaar=None,
                 doc_pan=None,
                 doc_dob=None,
@@ -157,7 +142,6 @@ def run_identity_validation(case: CaseInput, golden: GoldenRecord) -> list[Valid
             validate_document_against_golden(
                 document_id=case.bank_statement.doc_id,
                 doc_name=case.bank_statement.name,
-                doc_address=None,
                 doc_aadhaar=None,
                 doc_pan=None,
                 doc_dob=None,

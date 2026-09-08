@@ -10,6 +10,11 @@ from enum import Enum
 class DocType(str, Enum):
     AADHAAR = "AADHAAR"
     PAN = "PAN"
+    # Retired: no longer accepted by the API or produced by the pipeline.
+    # Kept because this backs a Postgres enum (documents.doc_type) that may
+    # still hold ADDRESS_PROOF in historical rows, and Postgres has no
+    # ALTER TYPE ... DROP VALUE -- removing it means recreating the type and
+    # rewriting the column (see 0009's note on the same problem for check_type).
     ADDRESS_PROOF = "ADDRESS_PROOF"
     SALARY_SLIP = "SALARY_SLIP"
     BANK_STATEMENT = "BANK_STATEMENT"

@@ -24,10 +24,6 @@ export const panFieldsInSchema = z.object({
   pan_number: z.string().nullable().optional(),
 })
 
-export const addressProofFieldsInSchema = z.object({
-  address: z.string().nullable().optional(),
-})
-
 export const salarySlipFieldsInSchema = z.object({
   name: z.string().nullable().optional(),
   employer_name: z.string().nullable().optional(),
@@ -57,12 +53,6 @@ export const panDocumentInSchema = z.object({
   source_file_ref: z.string().nullable().optional(),
 })
 
-export const addressProofDocumentInSchema = z.object({
-  doc_type: z.literal('ADDRESS_PROOF'),
-  extracted_fields: addressProofFieldsInSchema,
-  source_file_ref: z.string().nullable().optional(),
-})
-
 export const salarySlipDocumentInSchema = z.object({
   doc_type: z.literal('SALARY_SLIP'),
   salary_slips: z.array(salarySlipInSchema),
@@ -78,7 +68,6 @@ export const bankStatementDocumentInSchema = z.object({
 export const documentInSchema = z.discriminatedUnion('doc_type', [
   aadhaarDocumentInSchema,
   panDocumentInSchema,
-  addressProofDocumentInSchema,
   salarySlipDocumentInSchema,
   bankStatementDocumentInSchema,
 ])
@@ -91,7 +80,6 @@ export const caseCreateRequestSchema = z.object({
 export type BankTransactionIn = z.infer<typeof bankTransactionInSchema>
 export type AadhaarDocumentIn = z.infer<typeof aadhaarDocumentInSchema>
 export type PanDocumentIn = z.infer<typeof panDocumentInSchema>
-export type AddressProofDocumentIn = z.infer<typeof addressProofDocumentInSchema>
 export type SalarySlipDocumentIn = z.infer<typeof salarySlipDocumentInSchema>
 export type BankStatementDocumentIn = z.infer<typeof bankStatementDocumentInSchema>
 export type DocumentIn = z.infer<typeof documentInSchema>

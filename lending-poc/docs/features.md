@@ -21,7 +21,7 @@ Before anything else runs, the pipeline checks that all of `AADHAAR`, `PAN`, `SA
 
 The Golden Record is the single trusted identity profile for the applicant, built by merging the KYC documents:
 
-- **Address & DOB**: sourced from `AADHAAR`. If Aadhaar has no address, `ADDRESS_PROOF` is used as a fallback.
+- **Address & DOB**: sourced from `AADHAAR` only. If Aadhaar carries no address, the Golden Record simply has none — there is no fallback document, and address is not a mandatory Golden Record field, so this does not fail the case.
 - **Aadhaar number**: from `AADHAAR`.
 - **PAN number**: from `PAN`.
 - **Name**: the more interesting case.
@@ -29,7 +29,7 @@ The Golden Record is the single trusted identity profile for the applicant, buil
   - If both have a name, and they're recognizably the same person (`fuzzy.name_similarity` >= `NAME_MATCH_THRESHOLD`, 85), the **fuller** name (more tokens) wins — e.g. "Sneha Sunil Lokhande" over "Sneha Lokhande" — because it carries strictly more identity information.
   - If the two names *aren't* recognizably related, Aadhaar stays authoritative and the mismatch is left for the NAME identity check to flag, rather than silently trusting an unrelated "fuller" name.
 - The chosen name is split into `first_name` / `middle_name` / `last_name`.
-- If an address was resolved, an address embedding is computed (`app.matching.embeddings.get_address_embedding`) and stored for later similarity checks.
+- If an address was resolved, an address embedding is computed (`app.matching.embeddings.get_address_embedding`) and stored on the Golden Record's `pgvector` column for future cross-applicant similarity search. It is **not** used by the validation pipeline — address is not a scored check (see §3).
 
 Each golden field also records its `*_source` (which document it came from), useful for traceability.
 
@@ -47,15 +47,13 @@ Every document that carries an identity field is compared against the Golden Rec
 
 | Document | Fields checked |
 |---|---|
-| AADHAAR | name, address, aadhaar_number, DOB |
+| AADHAAR | name, aadhaar_number, DOB |
 | PAN | name, pan_number |
-| ADDRESS_PROOF | address |
 | Each SALARY_SLIP | name |
 | BANK_STATEMENT | name |
 
 Matching strategies (`app/matching/`):
 - **NAME** — fuzzy string similarity (`fuzzy.name_similarity`), handles reordering (surname-first), initials, and minor spelling differences. Passes at >= 85.
-- **ADDRESS** — embedding cosine similarity (`embeddings.address_similarity`), tolerant of differently-worded but equivalent addresses (e.g. "Apartment" vs "Flat", "MH" vs "Maharashtra"). Passes at >= 0.55 similarity (scored as similarity × 100).
 - **AADHAAR / PAN / DOB** — exact matching (`app.matching.exact`). Result is `MATCH` (score 100), `NO_MATCH` (score 0), or `INCONCLUSIVE` (score 50, e.g. one side missing/unparseable).
 
 ## 4. Business Validation (`app/services/business_validation.py`)
@@ -90,7 +88,6 @@ Given every `ValidationResult` produced above:
    | Check | Weight |
    |---|---|
    | NAME | 0.15 |
-   | ADDRESS | 0.10 |
    | AADHAAR | 0.15 |
    | PAN | 0.15 |
    | DOB | 0.10 |
@@ -125,7 +122,6 @@ Document primary keys are resolved via an in-memory `doc_id -> Document.id` map 
 |---|---|
 | `AADHAAR` | Primary identity source (name, address, DOB, Aadhaar number) |
 | `PAN` | Secondary identity source (name, PAN number) |
-| `ADDRESS_PROOF` | Address fallback if Aadhaar has none |
 | `SALARY_SLIP` | Declared income; multiple allowed per case (one per month) |
 | `BANK_STATEMENT` | Source of truth for actual salary credits |
 
@@ -137,7 +133,6 @@ All thresholds/weights are centralized here as plain constants (intended to move
 |---|---|---|
 | `NAME_MATCH_THRESHOLD` | 85.0 | Min fuzzy score for NAME to pass |
 | `EMPLOYER_MATCH_THRESHOLD` | 80.0 | Min fuzzy score for EMPLOYER to pass |
-| `ADDRESS_SIMILARITY_THRESHOLD` | 0.55 | Min cosine similarity for ADDRESS to pass |
 | `SALARY_CREDIT_EXTRA_MONTHS` | 1 | Months the salary-credit search window extends past the declared month |
 | `SALARY_CREDIT_BUFFER_DAYS` | 5 | Days the window starts before the declared month |
 | `TXN_SELECTION_EMPLOYER_WEIGHT` | 0.70 | Weight of narration similarity in transaction selection |

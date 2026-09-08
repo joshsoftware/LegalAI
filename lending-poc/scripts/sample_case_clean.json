@@ -20,13 +20,6 @@
       "source_file_ref": "s3://kyc-docs/APP-CLEAN-0001/pan_card.pdf"
     },
     {
-      "doc_type": "ADDRESS_PROOF",
-      "extracted_fields": {
-        "address": "Flat 702, Silver Oak Residency, Viman Nagar, Pune, Maharashtra 411014"
-      },
-      "source_file_ref": "s3://kyc-docs/APP-CLEAN-0001/electricity_bill.pdf"
-    },
-    {
       "doc_type": "SALARY_SLIP",
       "salary_slips": [
         {

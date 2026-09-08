@@ -68,16 +68,6 @@ def _document_rows(case: CaseInput) -> list[tuple[str, Document]]:
             ),
         ))
 
-    if case.address_proof:
-        rows.append((
-            case.address_proof.doc_id,
-            Document(
-                doc_type=DocType.ADDRESS_PROOF,
-                source_file_ref=case.address_proof.source_file_ref,
-                extracted_fields={"address": case.address_proof.address},
-            ),
-        ))
-
     for slip in case.salary_slips:
         rows.append((
             slip.doc_id,

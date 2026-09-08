@@ -1,7 +1,7 @@
 """Builds the one trusted identity profile (Golden Record) per applicant.
 
-Field precedence: AADHAAR is the primary source for address/DOB, with
-ADDRESS_PROOF as a fallback for address. For name specifically: when both
+Field precedence: AADHAAR is the sole source for address and DOB. For
+name specifically: when both
 AADHAAR and PAN carry a name, and they're recognizably the same person
 (per fuzzy.name_similarity), the fuller of the two (more name tokens) is
 preferred as the golden name — e.g. "Ankita Sunil Advitot" over "Ankita
@@ -67,10 +67,6 @@ def build_golden_record(case: CaseInput) -> GoldenRecord:
     if case.aadhaar and case.aadhaar.aadhaar_number is not None:
         golden.aadhaar_number = case.aadhaar.aadhaar_number
         golden.aadhaar_source = case.aadhaar.doc_id
-
-    if golden.address is None and case.address_proof and case.address_proof.address is not None:
-        golden.address = case.address_proof.address
-        golden.address_source = case.address_proof.doc_id
 
     if case.pan and case.pan.pan_number is not None:
         golden.pan_number = case.pan.pan_number

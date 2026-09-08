@@ -39,10 +39,6 @@ class PanFieldsIn(BaseModel):
     pan_number: str | None = None
 
 
-class AddressProofFieldsIn(BaseModel):
-    address: str | None = None
-
-
 class SalarySlipFieldsIn(BaseModel):
     name: str | None = None
     employer_name: str | None = None
@@ -72,12 +68,6 @@ class PanDocumentIn(BaseModel):
     source_file_ref: str | None = None
 
 
-class AddressProofDocumentIn(BaseModel):
-    doc_type: Literal["ADDRESS_PROOF"]
-    extracted_fields: AddressProofFieldsIn
-    source_file_ref: str | None = None
-
-
 class SalarySlipDocumentIn(BaseModel):
     doc_type: Literal["SALARY_SLIP"]
     salary_slips: list[SalarySlipIn]
@@ -94,7 +84,6 @@ DocumentIn = Annotated[
     Union[
         AadhaarDocumentIn,
         PanDocumentIn,
-        AddressProofDocumentIn,
         SalarySlipDocumentIn,
         BankStatementDocumentIn,
     ],

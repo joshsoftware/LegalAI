@@ -9,7 +9,6 @@ REQUIRED_DOCUMENT_TYPES = ["AADHAAR", "PAN", "SALARY_SLIP", "BANK_STATEMENT"]
 
 NAME_MATCH_THRESHOLD = 85.0
 EMPLOYER_MATCH_THRESHOLD = 80.0
-ADDRESS_SIMILARITY_THRESHOLD = 0.55  # cosine, 0-1 (stub embeddings are coarser than real ones)
 
 SALARY_CREDIT_EXTRA_MONTHS = 1
 SALARY_CREDIT_BUFFER_DAYS = 5
@@ -26,9 +25,11 @@ TXN_SELECTION_MIN_SCORE = 60.0
 # employers/languages/formats).
 SALARY_AMOUNT_TOLERANCE_PCT = 3.0
 
+# No ADDRESS weight: address is resolved onto the Golden Record but not
+# cross-checked, since golden.address is copied from the very document it
+# would be compared against (see identity_validation's module docstring).
 VALIDATION_WEIGHTS = {
     "NAME": 0.15,
-    "ADDRESS": 0.10,
     "AADHAAR": 0.15,
     "PAN": 0.15,
     "DOB": 0.10,
