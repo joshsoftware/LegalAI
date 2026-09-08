@@ -34,6 +34,11 @@ VALIDATION_WEIGHTS = {
     "DOB": 0.10,
     "EMPLOYER": 0.10,
     "SALARY_CREDIT_COUNT": 0.25,
+    # Deliberately not carved out of SALARY_CREDIT_COUNT's weight: compute_score
+    # renormalizes by the weight of check types actually present in a case's
+    # results, so a case with zero SALARY_CONTINUITY results (no gap months
+    # detected) is scored identically to before this check type existed.
+    "SALARY_CONTINUITY": 0.10,
 }
 
 DECISION_PASS_THRESHOLD = 90.0
