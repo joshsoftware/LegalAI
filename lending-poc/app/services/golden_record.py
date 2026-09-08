@@ -11,7 +11,6 @@ and the mismatch is left for identity_validation's NAME check to flag,
 rather than silently adopting an unrelated "fuller" name.
 """
 
-from app.matching.embeddings import get_address_embedding
 from app.matching.fuzzy import name_similarity
 from app.services import validation_config as cfg
 from app.services.dto import CaseInput, GoldenRecord
@@ -71,8 +70,5 @@ def build_golden_record(case: CaseInput) -> GoldenRecord:
     if case.pan and case.pan.pan_number is not None:
         golden.pan_number = case.pan.pan_number
         golden.pan_source = case.pan.doc_id
-
-    if golden.address:
-        golden.address_embedding = get_address_embedding(golden.address)
 
     return golden

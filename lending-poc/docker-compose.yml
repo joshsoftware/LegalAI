@@ -10,13 +10,14 @@
 # GPU device reservation, a different build), rather than duplicating the
 # whole block.
 services:
-  # Postgres with the pgvector extension, used for storing embeddings
-  # (see the sentence-transformers note on `backend` below). `healthcheck`
-  # lets `backend`'s `depends_on: condition: service_healthy` wait for
-  # Postgres to actually accept connections, not just for the container to
-  # start.
+  # Plain Postgres. This was pgvector/pgvector:pg16 while golden_records held
+  # an address_embedding vector column; that column was write-only and was
+  # dropped in migration 0010, so no extension is needed any more.
+  # `healthcheck` lets `backend`'s `depends_on: condition: service_healthy`
+  # wait for Postgres to actually accept connections, not just for the
+  # container to start.
   db:
-    image: pgvector/pgvector:pg16
+    image: postgres:16
     env_file:
       - .env
     environment:
@@ -122,13 +123,17 @@ services:
   # *_BASE_URL vars point at 127.0.0.1 since they're now processes in the
   # same container rather than separate services on the Docker network.
   # Same cpu/gpu profile split as ollama/surya-inference above: the GPU
-  # build arg controls which torch wheel gets installed for the two
-  # torch-dependent deps in here (sentence-transformers, surya-ocr).
-  # Only sentence-transformers (embeddings for /cases) actually runs model
-  # inference in this container, so it's the only thing backend-gpu's GPU
-  # is used for — surya-ocr depends on torch too, but here it's just a thin
-  # HTTP client to the surya-inference service above, which does the real
-  # OCR GPU work.
+  # build arg controls which torch wheel gets installed for the one remaining
+  # torch-dependent dep in here (surya-ocr).
+  #
+  # NOTE: nothing in this container runs model inference any more.
+  # sentence-transformers (embeddings for /cases) was the only thing that did,
+  # and it was removed along with the address_embedding column. surya-ocr
+  # still pulls in torch, but here it's just a thin HTTP client to the
+  # surya-inference service above, which does the real OCR GPU work. So
+  # backend-gpu's GPU reservation currently buys nothing — the profile is kept
+  # for symmetry with the other services, but it could be collapsed to a
+  # single CPU build.
   backend:
     &backend
     build:
@@ -164,8 +169,7 @@ services:
       FIELD_MAPPING_BASE_URL: http://127.0.0.1:8002
       OCR_BASE_URL: http://127.0.0.1:8010
       # Each backend has a model in its path and can legitimately run for
-      # minutes (OCR to Surya, translation/field-mapping to Ollama, /cases
-      # loading a sentence-transformers model on first call) — these match
+      # minutes (OCR to Surya, translation/field-mapping to Ollama) — these match
       # the timeouts the frontend already budgets for the same calls, so the
       # gateway is never the first link in the chain to give up.
       # TEMP(slow-host testing): raised from 300 to 1800. Revert before merging.
@@ -175,10 +179,11 @@ services:
       APP_REQUEST_TIMEOUT_SECONDS: ${APP_REQUEST_TIMEOUT_SECONDS:-1800}
     volumes:
       - .:/app
-      # Both /cases (sentence-transformers) and OCR (surya-ocr) pull their
-      # models from the HuggingFace hub on first use. Without this the
-      # download repeats on every container recreate, which takes minutes and
-      # needs network — same reasoning as ollama_models/surya_models above.
+      # OCR (surya-ocr) pulls its models from the HuggingFace hub on first
+      # use. Without this the download repeats on every container recreate,
+      # which takes minutes and needs network — same reasoning as
+      # ollama_models/surya_models above. (/cases used to pull a
+      # sentence-transformers model here too, until embeddings were removed.)
       - hf_cache:/root/.cache/huggingface
     # Only one of ollama/ollama-gpu and one of surya-inference/surya-inference-gpu
     # exists at runtime (profile-gated), so all four are listed here as
