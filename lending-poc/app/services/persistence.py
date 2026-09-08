@@ -135,7 +135,6 @@ async def save_pipeline_result(
                 case_id=case.id,
                 name=golden.name,
                 address=golden.address,
-                address_embedding=golden.address_embedding or None,
                 aadhaar_number=golden.aadhaar_number,
                 pan_number=golden.pan_number,
                 date_of_birth=golden.date_of_birth,

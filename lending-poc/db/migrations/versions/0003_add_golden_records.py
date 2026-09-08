@@ -4,12 +4,17 @@ Revision ID: 0003_add_golden_records
 Revises: 0002_add_documents
 Create Date: 2026-08-10 11:51:33.283278
 
+NOTE: this originally created an `address_embedding` pgvector column. That
+column was removed in 0010, and it is omitted here so a fresh database can
+replay the whole chain on plain `postgres:16` rather than needing the
+`pgvector/pgvector` image just to create a column 0010 immediately drops.
+Databases created before 0010 still have the column; 0010 drops it with
+`IF EXISTS`, so both paths end at the same schema.
 """
 from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-import pgvector.sqlalchemy
 
 import db.models.types
 
@@ -27,7 +32,6 @@ def upgrade() -> None:
         sa.Column("case_id", sa.UUID(), nullable=False),
         sa.Column("name", sa.String(), nullable=True),
         sa.Column("address", sa.String(), nullable=True),
-        sa.Column("address_embedding", pgvector.sqlalchemy.vector.VECTOR(dim=384), nullable=True),
         sa.Column("aadhaar_number", db.models.types.EncryptedString(), nullable=True),
         sa.Column("pan_number", db.models.types.EncryptedString(), nullable=True),
         sa.Column("date_of_birth", sa.Date(), nullable=True),

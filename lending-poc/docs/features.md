@@ -29,7 +29,6 @@ The Golden Record is the single trusted identity profile for the applicant, buil
   - If both have a name, and they're recognizably the same person (`fuzzy.name_similarity` >= `NAME_MATCH_THRESHOLD`, 85), the **fuller** name (more tokens) wins — e.g. "Sneha Sunil Lokhande" over "Sneha Lokhande" — because it carries strictly more identity information.
   - If the two names *aren't* recognizably related, Aadhaar stays authoritative and the mismatch is left for the NAME identity check to flag, rather than silently trusting an unrelated "fuller" name.
 - The chosen name is split into `first_name` / `middle_name` / `last_name`.
-- If an address was resolved, an address embedding is computed (`app.matching.embeddings.get_address_embedding`) and stored on the Golden Record's `pgvector` column for future cross-applicant similarity search. It is **not** used by the validation pipeline — address is not a scored check (see §3).
 
 Each golden field also records its `*_source` (which document it came from), useful for traceability.
 
@@ -110,7 +109,7 @@ Final decision logic, in priority order:
 A successful pipeline run is persisted in a single DB transaction:
 - One `Case` row (`applicant_ref`, `status` derived from the decision: PASS/FAIL/NEEDS_REVIEW).
 - One `Document` row per submitted document (including one per salary slip), storing `extracted_fields` as JSON.
-- One `GoldenRecord` row (name, address + embedding, Aadhaar/PAN numbers, DOB).
+- One `GoldenRecord` row (name, address, Aadhaar/PAN numbers, DOB).
 - One `ValidationResult` row per check performed, linked back to the specific document it was evaluated against where applicable.
 - One `PipelineResult` row with the overall score, decision, and reasons.
 

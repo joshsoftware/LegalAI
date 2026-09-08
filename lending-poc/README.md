@@ -1,6 +1,6 @@
 # Lending POC
 
-Lending POC — FastAPI backend + PostgreSQL (pgvector), plus a document
+Lending POC — FastAPI backend + PostgreSQL, plus a document
 processing pipeline (OCR, translation, field mapping) fronted by a gateway,
 and a React frontend. This guide covers running the **entire stack in
 Docker**.
@@ -88,7 +88,7 @@ the command above.)
 | Frontend | http://localhost:5173 | Main UI |
 | Gateway | http://localhost:8080 | Single public entrypoint — fronts app/OCR/translation/field-mapping |
 | App (cases API) | http://localhost:8000 | Docs at `/docs`; also reachable via gateway at `/cases`, `/app/health` |
-| Postgres | localhost:55439 | pgvector-enabled |
+| Postgres | localhost:55439 | plain `postgres:16` |
 | OCR | http://localhost:8010 | Also reachable via gateway at `/extract`, `/ocr/health` |
 | Translation | http://localhost:8001 | Also reachable via gateway at `/translate/*`, `/translation/health` |
 | Field mapping | http://localhost:8002 | Also reachable via gateway at `/map`, `/field-mapping/health` |
@@ -151,8 +151,9 @@ switching the profile is enough for it. `surya-inference` is built from a
 CUDA base image for the `gpu` profile (see
 [document_processing/ocr/README.md](document_processing/ocr/README.md)
 for details); `backend-gpu` instead passes a `GPU=1` build arg that skips
-pinning the CPU-only PyTorch wheel, so `ocr` (surya-ocr) and `app`
-(sentence-transformers) install CUDA-enabled PyTorch instead — see
+pinning the CPU-only PyTorch wheel, so `ocr` (surya-ocr) installs
+CUDA-enabled PyTorch instead. Note nothing in the backend image runs torch
+inference any more, so this buys nothing today — see
 [docker-compose.yml](docker-compose.yml) and the [Dockerfile](Dockerfile).
 
 ## Stopping and cleanup

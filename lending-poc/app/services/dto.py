@@ -112,7 +112,6 @@ class GoldenRecord:
     last_name: str | None = None
     address: str | None = None
     address_source: str | None = None
-    address_embedding: list[float] = field(default_factory=list)
     date_of_birth: date | None = None
     dob_source: str | None = None
     aadhaar_number: str | None = None
