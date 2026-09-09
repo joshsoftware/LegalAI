@@ -22,6 +22,7 @@ export const aadhaarFieldsInSchema = z.object({
 export const panFieldsInSchema = z.object({
   name: z.string().nullable().optional(),
   pan_number: z.string().nullable().optional(),
+  date_of_birth: z.string().nullable().optional(),
 })
 
 export const salarySlipFieldsInSchema = z.object({

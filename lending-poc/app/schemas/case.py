@@ -37,6 +37,7 @@ class AadhaarFieldsIn(BaseModel):
 class PanFieldsIn(BaseModel):
     name: str | None = None
     pan_number: str | None = None
+    date_of_birth: str | None = None
 
 
 class SalarySlipFieldsIn(BaseModel):

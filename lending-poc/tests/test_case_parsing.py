@@ -25,6 +25,10 @@ def _aadhaar(**fields):
     return {"doc_type": "AADHAAR", "extracted_fields": fields}
 
 
+def _pan(**fields):
+    return {"doc_type": "PAN", "extracted_fields": fields}
+
+
 def _salary_slip(*slips):
     return {
         "doc_type": "SALARY_SLIP",
@@ -136,6 +140,37 @@ def test_document_formats_are_normalized_to_canonical_types():
     assert case.salary_slips[0].salary_month == date(2026, 3, 1)
     assert case.bank_statement.transactions[0].amount == pytest.approx(75000.0)
     assert case.bank_statement.transactions[0].txn_date == date(2026, 4, 3)
+
+
+def test_pan_date_of_birth_is_parsed_and_normalized():
+    """PAN cards print a DOB, so it must survive parsing to be cross-checked
+    against the Aadhaar DOB during identity validation."""
+    case = parse_case(_payload(_pan(name="A", pan_number="ABCDE1234F", date_of_birth="19-Aug-1994")))
+
+    assert case.pan.date_of_birth == date(1994, 8, 19)
+
+
+def test_malformed_pan_date_of_birth_is_aggregated_like_any_other_field():
+    with pytest.raises(CaseParseError) as excinfo:
+        parse_case(
+            _payload(
+                _aadhaar(name="A", date_of_birth="garbage"),
+                _pan(name="A", pan_number="ABCDE1234F", date_of_birth="14-03-95"),
+            )
+        )
+
+    assert [(e.document, e.field, e.reason) for e in excinfo.value.errors] == [
+        ("AADHAAR", "date_of_birth", "unrecognised_date_format"),
+        ("PAN", "date_of_birth", "ambiguous_two_digit_year"),
+    ]
+
+
+def test_absent_pan_date_of_birth_is_not_an_error():
+    """A PAN whose DOB was never extracted stays None rather than failing --
+    the field is optional on the wire even though the template requests it."""
+    case = parse_case(_payload(_pan(name="A", pan_number="ABCDE1234F")))
+
+    assert case.pan.date_of_birth is None
 
 
 @pytest.mark.parametrize("sample", ["sample_case.json", "sample_case_clean.json"])
