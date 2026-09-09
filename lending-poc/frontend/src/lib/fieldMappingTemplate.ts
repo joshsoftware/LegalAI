@@ -9,39 +9,49 @@ import type { DocType } from '@/store/useAppStore'
 export const FIELD_MAPPING_TEMPLATE: FieldMappingTemplate = [
   {
     document_type: 'salary_slip',
-    document_metadata: {
-      document_date: 'date (YYYY-MM-DD)',
-      period: {
-        from: 'Mandatory, date (YYYY-MM-DD)',
-        to: 'Mandatory, date (YYYY-MM-DD)',
+    // One entry per slip present in the upload, not per uploaded file.
+    // Applicants submit several months as a single multi-page PDF, and field
+    // mapping runs once per file — so a flat single-slip shape left the model
+    // nowhere to put month 2 and silently dropped it. Same array-of-one-example
+    // convention as `transactions` below, and it matches the /cases contract,
+    // where SALARY_SLIP carries a `salary_slips` array (see docs/cases_api.md).
+    slips: [
+      {
+        document_metadata: {
+          document_date: 'date (YYYY-MM-DD)',
+          period: {
+            from: 'Mandatory, date (YYYY-MM-DD)',
+            to: 'Mandatory, date (YYYY-MM-DD)',
+          },
+          currency: '',
+        },
+        employer: { name: 'Mandatory' },
+        employee: {
+          employee_id: '',
+          name: 'Mandatory',
+          bank_account_number: 'Mandatory',
+          date_of_joining: 'May be imp',
+          days_worked: 'May be imp',
+        },
+        earnings: {
+          basic_per_month: null,
+          gross_per_month: null,
+          allowances_per_month: null,
+          other: null,
+        },
+        deductions: {
+          total: null,
+          tax: null,
+          retirement_contribution: null,
+          other: null,
+        },
+        net_salary: {
+          amount: 'Mandatory, number (no currency symbol or thousands separators)',
+          currency: 'Mandatory',
+          amount_in_words: '',
+        },
       },
-      currency: '',
-    },
-    employer: { name: 'Mandatory' },
-    employee: {
-      employee_id: '',
-      name: 'Mandatory',
-      bank_account_number: 'Mandatory',
-      date_of_joining: 'May be imp',
-      days_worked: 'May be imp',
-    },
-    earnings: {
-      basic_per_month: null,
-      gross_per_month: null,
-      allowances_per_month: null,
-      other: null,
-    },
-    deductions: {
-      total: null,
-      tax: null,
-      retirement_contribution: null,
-      other: null,
-    },
-    net_salary: {
-      amount: 'Mandatory, number (no currency symbol or thousands separators)',
-      currency: 'Mandatory',
-      amount_in_words: '',
-    },
+    ],
   },
   {
     document_type: 'bank_statement',

@@ -155,16 +155,29 @@ export function mapFieldMappingResultToCaseRequest(
 
   const salarySlip = resultFor('SALARY_SLIP')
   if (Object.keys(salarySlip).length > 0) {
-    const employer = asRecord(salarySlip.employer)
-    const employee = asRecord(salarySlip.employee)
-    const netSalary = asRecord(salarySlip.net_salary)
-    const documentMetadata = asRecord(salarySlip.document_metadata)
-    const period = asRecord(documentMetadata.period)
+    const salarySlipFileRef = asString(salarySlip.source_file_ref)
+
+    // The template asks for a `slips` array (one upload can hold several
+    // months), but fall back to reading the top-level object as a single slip.
+    // response_parser.reconcile_with_schema passes arrays straight through
+    // without null-filling them, so a model that ignores the array instruction
+    // would otherwise produce zero slips here — and /cases rejects an empty
+    // array outright with `no_salary_slips`, failing the whole case. That is a
+    // worse outcome than the one slip this code used to yield.
+    const rawSlips = asArray(salarySlip.slips)
+    const slipSources: unknown[] = rawSlips.length > 0 ? rawSlips : [salarySlip]
 
     documents.push({
       doc_type: 'SALARY_SLIP',
-      salary_slips: [
-        {
+      salary_slips: slipSources.map((rawSlip) => {
+        const slip = asRecord(rawSlip)
+        const employer = asRecord(slip.employer)
+        const employee = asRecord(slip.employee)
+        const netSalary = asRecord(slip.net_salary)
+        const documentMetadata = asRecord(slip.document_metadata)
+        const period = asRecord(documentMetadata.period)
+
+        return {
           extracted_fields: {
             name: asString(employee.name),
             employer_name: asString(employer.name),
@@ -174,10 +187,12 @@ export function mapFieldMappingResultToCaseRequest(
               asString(period.from) ?? asString(documentMetadata.document_date)
             ),
           },
-          source_file_ref: asString(salarySlip.source_file_ref),
-        },
-      ],
-      source_file_ref: asString(salarySlip.source_file_ref),
+          // Every slip in a multi-page PDF shares the one uploaded file, so
+          // fall back to the file's ref when the model gave no per-slip one.
+          source_file_ref: asString(slip.source_file_ref) ?? salarySlipFileRef,
+        }
+      }),
+      source_file_ref: salarySlipFileRef,
     })
   }
 

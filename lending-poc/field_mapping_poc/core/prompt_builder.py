@@ -25,6 +25,12 @@ Your job:
 - If a field's value cannot be confidently found in the text, set it to null. \
 Never guess or fabricate a value.
 - Preserve the exact key names and nesting structure of the target schema.
+- Where the schema contains an array, its single element is an EXAMPLE of \
+the shape to repeat, not a fixed length: emit one element per occurrence you \
+find in the document. A document holding three months of salary slips gets \
+three elements, one per slip. Never collapse several occurrences into one \
+element, and never merge values from different occurrences into the same \
+element.
 - Normalize every value you extract into a machine-readable form:
   - Dates: ISO 8601 `YYYY-MM-DD`. If the document only gives a month and \
 year, output `YYYY-MM`.
