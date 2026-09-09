@@ -28,7 +28,8 @@ Adds the `POST /cases` endpoint, the first user-facing entry point into the lend
       "doc_type": "PAN",
       "extracted_fields": {
         "name": "Sneha Lokhande",
-        "pan_number": "ABCDE1234F"
+        "pan_number": "ABCDE1234F",
+        "date_of_birth": "1995-03-14"
       },
       "source_file_ref": "s3://kyc-docs/APP-2026-00123/pan_card.pdf"
     },
@@ -65,6 +66,7 @@ Notes:
 - `applicant_ref` and `documents` are required.
 - Every document needs `doc_type` and `extracted_fields`; `source_file_ref` is optional.
 - `SALARY_SLIP` is the only `doc_type` that carries a `salary_slips` array instead of a flat `extracted_fields` — a case can include multiple salary slips (one per month).
+- `PAN.date_of_birth` is optional on the wire but should be sent whenever the extractor produced it: it is the only value that makes the DOB check a real cross-document comparison rather than Aadhaar's DOB being compared against itself. Like every other date it is format-tolerant (`1995-03-14`, `14/03/1995`, `14-Mar-1995` all work).
 - Accepted document types are exactly `AADHAAR`, `PAN`, `SALARY_SLIP`, `BANK_STATEMENT`, and all four are required for a case to proceed. `documents` is a discriminated union on `doc_type`, so any other value (including the previously accepted `ADDRESS_PROOF`) is rejected with `422 union_tag_invalid`.
 
 ### Response `200 OK`

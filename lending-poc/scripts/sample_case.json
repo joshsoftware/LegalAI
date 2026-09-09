@@ -30,7 +30,8 @@
       "doc_type": "PAN",
       "extracted_fields": {
         "name": "Sneha Lokhande",
-        "pan_number": "ABCDE1234F"
+        "pan_number": "ABCDE1234F",
+        "date_of_birth": "1995-03-14"
       },
       "source_file_ref": "s3://kyc-docs/APP-2026-00123/pan_card.pdf"
     }, 

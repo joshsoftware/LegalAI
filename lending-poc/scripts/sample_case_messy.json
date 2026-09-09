@@ -15,7 +15,8 @@
       "doc_type": "PAN",
       "extracted_fields": {
         "name": "Arjun R Iyer",
-        "pan_number": "AXKPI2938Q"
+        "pan_number": "AXKPI2938Q",
+        "date_of_birth": "19-Aug-1994"
       },
       "source_file_ref": "s3://kyc-docs/APP-MESSY-0001/pan_card.pdf"
     },

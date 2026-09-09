@@ -144,6 +144,11 @@ def parse_case(payload: dict) -> CaseInput:
             case.pan = PanDoc(
                 name=_get(fields, "name"),
                 pan_number=_text(_get(fields, "pan_number")),
+                date_of_birth=collect.as_date(
+                    _get(fields, "date_of_birth"),
+                    document="PAN",
+                    field="date_of_birth",
+                ),
                 source_file_ref=doc.get("source_file_ref"),
             )
 

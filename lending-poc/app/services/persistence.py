@@ -64,7 +64,14 @@ def _document_rows(case: CaseInput) -> list[tuple[str, Document]]:
             Document(
                 doc_type=DocType.PAN,
                 source_file_ref=case.pan.source_file_ref,
-                extracted_fields={"name": case.pan.name, "pan_number": _mask_pan(case.pan.pan_number)},
+                extracted_fields={
+                    "name": case.pan.name,
+                    "pan_number": _mask_pan(case.pan.pan_number),
+                    # Kept in the audit trail because the DOB check compares
+                    # this value against Aadhaar's -- a reviewer looking at a
+                    # failed DOB check needs to see both sides.
+                    "date_of_birth": case.pan.date_of_birth.isoformat() if case.pan.date_of_birth else None,
+                },
             ),
         ))
 

@@ -1,14 +1,30 @@
-"""Checks every document agrees with the Golden Record: name, Aadhaar,
-PAN, DOB. Also enforces that mandatory identity fields exist on the
-Golden Record at all, regardless of why they're missing.
+"""Checks every document agrees with the Golden Record on name and DOB.
+Also enforces that mandatory identity fields exist on the Golden Record at
+all, regardless of why they're missing.
 
-Address is deliberately NOT checked here. golden.address is copied verbatim
-from AADHAAR -- the only document that carries an address -- so comparing a
-document's address back against the Golden Record compared a value with
-itself and always scored 100. A check that cannot fail isn't a check --
-worse, since compute_score renormalizes by observed weight, a guaranteed
-100 pulled borderline cases up toward the pass threshold. Address is still
-resolved and stored on the Golden Record; it is simply not scored.
+Only NAME and DOB are *compared*, because a comparison is only meaningful
+when its two sides have independent provenance. Name appears on all four
+documents; DOB appears on both AADHAAR and PAN. Those two can genuinely
+disagree, so scoring them means something.
+
+ADDRESS, AADHAAR number and PAN number are deliberately NOT compared. Each
+has exactly one source document, and build_golden_record copies that value
+verbatim -- so comparing a document's value back against the Golden Record
+compared a value with itself and always scored 100 (or 50, for an Aadhaar
+too heavily masked to read 4 digits from; never a mismatch). A check that
+cannot fail isn't a check -- worse, since compute_score renormalizes by
+observed weight, guaranteed-100 components pulled borderline cases up
+toward the pass threshold. Together these three accounted for 0.40 of the
+weight table, all of it padding.
+
+All three values are still resolved onto the Golden Record and still
+required to be *present* -- see check_mandatory_presence, which remains the
+trigger for the hard-FAIL path in decision_engine. "Does this applicant
+have a PAN at all?" is a real question; "does the PAN match itself?" is not.
+
+The same rule applies one level down, inside the checks that DO survive: a
+document is never compared against a value it supplied itself, tracked via
+`golden.<field>_source`. See validate_document_against_golden.
 """
 
 from app.matching import exact, fuzzy
@@ -55,14 +71,33 @@ def _exact_result_to_validation(check_type: CheckType, outcome, document_id: str
 def validate_document_against_golden(
     document_id: str,
     doc_name: str | None,
-    doc_aadhaar: str | None,
-    doc_pan: str | None,
     doc_dob,
     golden: GoldenRecord,
 ) -> list[ValidationResult]:
+    """Compares one document's identity fields against the Golden Record.
+
+    Only NAME and DOB are compared, because they are the only identity
+    fields more than one document carries. Aadhaar and PAN numbers each
+    have exactly one source document, and build_golden_record copies that
+    value verbatim -- see this module's docstring.
+
+    A document is never compared against a Golden Record field it supplied
+    itself. `golden.<field>_source` records where each value came from, and
+    for that document the comparison would read a value against its own
+    copy: a guaranteed 100 that dilutes whatever genuine disagreement the
+    *other* documents report. Concretely, with the DOB sourced from AADHAAR,
+    a PAN that contradicts it outright used to average 100 and 0 into a
+    component score of 50 -- half the signal, purely from the self-match.
+
+    A field whose only source is the document that supplied it therefore
+    produces no result at all rather than a free 100. That is the honest
+    outcome -- the value is present but uncorroborated -- and compute_score
+    handles it correctly, since it renormalizes over the check types
+    actually observed rather than assuming a fixed set.
+    """
     results = []
 
-    if doc_name is not None and golden.name is not None:
+    if doc_name is not None and golden.name is not None and document_id != golden.name_source:
         score = fuzzy.name_similarity(golden.name, doc_name)
         passed = score >= cfg.NAME_MATCH_THRESHOLD
         results.append(
@@ -75,15 +110,7 @@ def validate_document_against_golden(
             )
         )
 
-    if doc_aadhaar is not None:
-        outcome = exact.aadhaar_match(golden.aadhaar_number, doc_aadhaar)
-        results.append(_exact_result_to_validation(CheckType.AADHAAR, outcome, document_id))
-
-    if doc_pan is not None:
-        outcome = exact.pan_match(golden.pan_number, doc_pan)
-        results.append(_exact_result_to_validation(CheckType.PAN, outcome, document_id))
-
-    if doc_dob is not None:
+    if doc_dob is not None and document_id != golden.dob_source:
         outcome = exact.dob_match(golden.date_of_birth, doc_dob)
         results.append(_exact_result_to_validation(CheckType.DOB, outcome, document_id))
 
@@ -95,7 +122,7 @@ def run_identity_validation(case: CaseInput, golden: GoldenRecord) -> list[Valid
     # 1) check_mandatory_presence: Golden Record itself must have name/Aadhaar/PAN/DOB,
     #    else that check type is an automatic hard failure (score 0.0).
     # 2) For each present document, validate_document_against_golden compares its fields
-    #    against the Golden Record (fuzzy name, exact Aadhaar/PAN/DOB).
+    #    against the Golden Record (fuzzy name, exact DOB).
     # All ValidationResults (pass/fail + score + reason) are flattened into one list.
     
     results: list[ValidationResult] = []
@@ -106,8 +133,6 @@ def run_identity_validation(case: CaseInput, golden: GoldenRecord) -> list[Valid
             validate_document_against_golden(
                 document_id=case.aadhaar.doc_id,
                 doc_name=case.aadhaar.name,
-                doc_aadhaar=case.aadhaar.aadhaar_number,
-                doc_pan=None,
                 doc_dob=case.aadhaar.date_of_birth,
                 golden=golden,
             )
@@ -118,9 +143,7 @@ def run_identity_validation(case: CaseInput, golden: GoldenRecord) -> list[Valid
             validate_document_against_golden(
                 document_id=case.pan.doc_id,
                 doc_name=case.pan.name,
-                doc_aadhaar=None,
-                doc_pan=case.pan.pan_number,
-                doc_dob=None,
+                doc_dob=case.pan.date_of_birth,
                 golden=golden,
             )
         )
@@ -130,8 +153,6 @@ def run_identity_validation(case: CaseInput, golden: GoldenRecord) -> list[Valid
             validate_document_against_golden(
                 document_id=slip.doc_id,
                 doc_name=slip.name,
-                doc_aadhaar=None,
-                doc_pan=None,
                 doc_dob=None,
                 golden=golden,
             )
@@ -142,8 +163,6 @@ def run_identity_validation(case: CaseInput, golden: GoldenRecord) -> list[Valid
             validate_document_against_golden(
                 document_id=case.bank_statement.doc_id,
                 doc_name=case.bank_statement.name,
-                doc_aadhaar=None,
-                doc_pan=None,
                 doc_dob=None,
                 golden=golden,
             )

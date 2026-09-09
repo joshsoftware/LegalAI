@@ -15,7 +15,8 @@
       "doc_type": "PAN",
       "extracted_fields": {
         "name": "Arjun Ramesh Iyer",
-        "pan_number": "AXKPI2938Q"
+        "pan_number": "AXKPI2938Q",
+        "date_of_birth": "1994-08-19"
       },
       "source_file_ref": "s3://kyc-docs/APP-CLEAN-0001/pan_card.pdf"
     },

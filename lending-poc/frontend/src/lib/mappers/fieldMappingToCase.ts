@@ -145,6 +145,9 @@ export function mapFieldMappingResultToCaseRequest(
       extracted_fields: {
         name: asString(pan.name),
         pan_number: asString(pan.pan_number),
+        // Cross-checked against the Aadhaar DOB during identity validation,
+        // so it must survive the mapping rather than being dropped here.
+        date_of_birth: asString(pan.date_of_birth),
       },
       source_file_ref: asString(pan.source_file_ref),
     })

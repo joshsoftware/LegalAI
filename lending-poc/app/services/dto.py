@@ -53,6 +53,9 @@ class AadhaarDoc:
 class PanDoc:
     name: str | None = None
     pan_number: str | None = None
+    # PAN cards print a DOB too, which makes it the one identity field
+    # besides name that two documents can genuinely disagree about.
+    date_of_birth: date | None = None
     source_file_ref: str | None = None
     doc_id: str = "PAN"
 
