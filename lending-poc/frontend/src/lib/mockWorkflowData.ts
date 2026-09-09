@@ -24,7 +24,7 @@ function makeMockFile(name: string, type: string): File {
 const MOCK_OCR_HTML: Record<DocType, string> = {
   AADHAAR: `<h2>Government of India</h2><p><strong>Name:</strong> Sneha Sunil Lokhande</p><p><strong>DOB:</strong> 14/03/1995</p><p><strong>Aadhaar Number:</strong> 6446 7654 4321</p><p><strong>Address:</strong> Flat 204, Green Heights, Baner, Pune, Maharashtra 411045</p>`,
   PAN: `<h2>Income Tax Department</h2><p><strong>Name:</strong> Sneha Sunil Lokhande</p><p><strong>PAN:</strong> ABCPL1234F</p><p><strong>DOB:</strong> 14/03/1995</p>`,
-  SALARY_SLIP: `<h2>ABC Technologies Pvt Ltd</h2><p>Payslip for March 2026</p><table border="1"><tr><td>Employee</td><td>Sneha Sunil Lokhande</td></tr><tr><td>Net Salary</td><td>INR 75,000</td></tr></table>`,
+  SALARY_SLIP: `<h2>ABC Technologies Pvt Ltd</h2><p>Payslip for March 2026</p><table border="1"><tr><td>Employee</td><td>Sneha Sunil Lokhande</td></tr><tr><td>Net Salary</td><td>INR 75,000</td></tr></table><hr /><h2>ABC Technologies Pvt Ltd</h2><p>Payslip for April 2026</p><table border="1"><tr><td>Employee</td><td>Sneha Sunil Lokhande</td></tr><tr><td>Net Salary</td><td>INR 75,000</td></tr></table>`,
   BANK_STATEMENT: `<h2>State Bank</h2><p>Account Statement</p><table border="1"><tr><th>Date</th><th>Narration</th><th>Amount</th></tr><tr><td>2026-04-01</td><td>ABC Technologies Pvt Ltd Salary</td><td>+75,000</td></tr></table>`,
 }
 
@@ -32,8 +32,10 @@ const MOCK_OCR_TEXT: Record<DocType, string> = {
   AADHAAR:
     'Government of India\nName: Sneha Sunil Lokhande\nDOB: 14/03/1995\nAadhaar Number: 6446 7654 4321\nAddress: Flat 204, Green Heights, Baner, Pune, Maharashtra 411045',
   PAN: 'Income Tax Department\nName: Sneha Sunil Lokhande\nPAN: ABCPL1234F\nDOB: 14/03/1995',
+  // Two months in one multi-page PDF — the common real-world upload. Page
+  // markers match what extractor/formatter.py emits for a multi-page doc.
   SALARY_SLIP:
-    'ABC Technologies Pvt Ltd\nPayslip for March 2026\nEmployee: Sneha Sunil Lokhande\nNet Salary: INR 75,000',
+    '--- Page 1 ---\nABC Technologies Pvt Ltd\nPayslip for March 2026\nEmployee: Sneha Sunil Lokhande\nNet Salary: INR 75,000\n\n--- Page 2 ---\nABC Technologies Pvt Ltd\nPayslip for April 2026\nEmployee: Sneha Sunil Lokhande\nNet Salary: INR 75,000',
   BANK_STATEMENT:
     'State Bank\nAccount Statement\n2026-04-01 ABC Technologies Pvt Ltd Salary +75,000',
 }
@@ -48,7 +50,7 @@ const MOCK_TRANSLATED_TEXT: Record<DocType, string> = {
 const MOCK_FILE_META: Record<DocType, { name: string; type: string }> = {
   AADHAAR: { name: 'aadhaar_card.jpg', type: 'image/jpeg' },
   PAN: { name: 'pan_card.jpg', type: 'image/jpeg' },
-  SALARY_SLIP: { name: 'salary_slip_march.pdf', type: 'application/pdf' },
+  SALARY_SLIP: { name: 'salary_slips_mar_apr.pdf', type: 'application/pdf' },
   BANK_STATEMENT: { name: 'bank_statement.pdf', type: 'application/pdf' },
 }
 
@@ -75,7 +77,7 @@ export function buildMockOcrResults(documents: UploadedDocument[]): Record<strin
       data: {
         filename: doc.fileName,
         file_type: `.${doc.fileName.split('.').pop()}`,
-        pages_processed: 1,
+        pages_processed: doc.docType === 'SALARY_SLIP' ? 2 : 1,
         extraction: {
           text: MOCK_OCR_TEXT[doc.docType],
           html: MOCK_OCR_HTML[doc.docType],
@@ -121,14 +123,28 @@ const MOCK_FIELD_MAPPING_RESULT_BY_DOC_TYPE: Record<DocType, FieldMappingResult>
   },
   SALARY_SLIP: {
     document_type: 'salary_slip',
-    document_metadata: {
-      document_date: '2026-03-31',
-      period: { from: '2026-03-01', to: '2026-03-31' },
-      currency: 'INR',
-    },
-    employer: { name: 'ABC Technologies Pvt Ltd' },
-    employee: { name: 'Sneha Sunil Lokhande' },
-    net_salary: { amount: 75000, currency: 'INR' },
+    slips: [
+      {
+        document_metadata: {
+          document_date: '2026-03-31',
+          period: { from: '2026-03-01', to: '2026-03-31' },
+          currency: 'INR',
+        },
+        employer: { name: 'ABC Technologies Pvt Ltd' },
+        employee: { name: 'Sneha Sunil Lokhande' },
+        net_salary: { amount: 75000, currency: 'INR' },
+      },
+      {
+        document_metadata: {
+          document_date: '2026-04-30',
+          period: { from: '2026-04-01', to: '2026-04-30' },
+          currency: 'INR',
+        },
+        employer: { name: 'ABC Technologies Pvt Ltd' },
+        employee: { name: 'Sneha Sunil Lokhande' },
+        net_salary: { amount: 75000, currency: 'INR' },
+      },
+    ],
   },
   BANK_STATEMENT: {
     document_type: 'bank_statement',
