@@ -2,10 +2,10 @@
 Decision in one call, with a simple in-memory audit log.
 """
 
-from app.services import business_validation, decision_engine, golden_record, scoring
-from app.services import validation_config as cfg
-from app.services.dto import CaseInput, Decision, DecisionResult, PipelineResult
-from app.services.identity_validation import run_identity_validation
+from cross_document_validation.services import business_validation, decision_engine, golden_record, scoring
+from cross_document_validation.services import validation_config as cfg
+from cross_document_validation.services.dto import CaseInput, Decision, DecisionResult, PipelineResult
+from cross_document_validation.services.identity_validation import run_identity_validation
 
 
 def run_pipeline(case: CaseInput) -> PipelineResult:

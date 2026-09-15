@@ -6,9 +6,9 @@ matched against bank transactions inside a broad, month-level window.
 from calendar import monthrange
 from datetime import date, timedelta
 
-from app.matching.fuzzy import employer_similarity
-from app.services import validation_config as cfg
-from app.services.dto import (
+from cross_document_validation.matching.fuzzy import employer_similarity
+from cross_document_validation.services import validation_config as cfg
+from cross_document_validation.services.dto import (
     BankStatementDoc,
     BankTransaction,
     CaseInput,
@@ -135,7 +135,12 @@ def _validate_salary_slip(
             score=0.0,
             document_id=slip.doc_id,
             failure_reason="no_matching_credit_in_window",
-            evidence={"window": window},
+            evidence={
+                "source_text": slip.salary_month.strftime("%B %Y"),
+                "target_text": None,
+                "match_type": "DATE_MATCH",
+                "window": window,
+            },
         )
 
     txn, score = selection
@@ -145,7 +150,12 @@ def _validate_salary_slip(
         passed=True,
         score=score,
         document_id=slip.doc_id,
-        evidence={"matched_transaction": txn},
+        evidence={
+            "source_text": slip.salary_month.strftime("%B %Y"),
+            "target_text": txn.txn_date.strftime("%Y-%m") if txn.txn_date else None,
+            "match_type": "DATE_MATCH",
+            "matched_transaction": txn,
+        },
     )
 
 
@@ -187,6 +197,11 @@ def _employer_match_for_slip(
         score=score,
         document_id=slip.doc_id,
         failure_reason=None if passed else "employer_narration_mismatch",
+        evidence={
+            "source_text": slip.employer_name,
+            "target_text": matched_txn.narration,
+            "match_type": "FUZZY",
+        },
     )
 
 
@@ -206,9 +221,12 @@ def _salary_credit_count(
         check_type=CheckType.SALARY_CREDIT_COUNT,
         passed=(matched_slips == total_slips),
         score=confidence_score,
+        document_id=bank_statement.doc_id,
         evidence={
+            "source_value": total_slips,
+            "target_value": matched_slips,
+            "match_type": "COUNT_MATCH",
             "stmt_duration": stmt_duration,
-            "no_of_matches": matched_slips,
             "total_slips": total_slips,
             "confidence_score": confidence_score,
         },

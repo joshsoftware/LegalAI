@@ -2,11 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.schemas.case import CaseCreateRequest, CaseCreateResponse, ValidationResultOut
-from app.services.case_parsing import parse_case
-from app.services.persistence import save_pipeline_result
-from app.services.pipeline import run_pipeline
-from app.utils.json_safe import json_safe
+from cross_document_validation.schemas.case import CaseCreateRequest, CaseCreateResponse, ValidationResultOut
+from cross_document_validation.services.case_parsing import parse_case
+from cross_document_validation.services.persistence import save_pipeline_result
+from cross_document_validation.services.pipeline import run_pipeline
+from cross_document_validation.utils.json_safe import json_safe
 
 router = APIRouter(tags=["cases"])
 

@@ -11,10 +11,10 @@ and the mismatch is left for identity_validation's NAME check to flag,
 rather than silently adopting an unrelated "fuller" name.
 """
 
-from app.matching.embeddings import get_address_embedding
-from app.matching.fuzzy import name_similarity
-from app.services import validation_config as cfg
-from app.services.dto import CaseInput, GoldenRecord
+from cross_document_validation.matching.embeddings import get_address_embedding
+from cross_document_validation.matching.fuzzy import name_similarity
+from cross_document_validation.services import validation_config as cfg
+from cross_document_validation.services.dto import CaseInput, GoldenRecord
 
 FULLER_NAME_RELATEDNESS_THRESHOLD = cfg.NAME_MATCH_THRESHOLD
 

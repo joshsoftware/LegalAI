@@ -1,9 +1,9 @@
 """Persists one pipeline run (CaseInput + PipelineResult) to the database.
 
-The in-memory dataclasses in app.services.dto reference documents by their
-string doc_id (e.g. "AADHAAR", "SALARY_SLIP-0"). This module inserts the
-Document rows first and keeps a doc_id -> Document.id map so
-ValidationResult.document_id (also a doc_id string) can be resolved to the
+The in-memory dataclasses in cross_document_validation.services.dto reference
+documents by their string doc_id (e.g. "AADHAAR", "SALARY_SLIP-0"). This
+module inserts the Document rows first and keeps a doc_id -> Document.id map
+so ValidationResult.document_id (also a doc_id string) can be resolved to the
 real foreign key.
 """
 
@@ -11,9 +11,9 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.dto import CaseInput, Decision, DocType
-from app.services.dto import PipelineResult as PipelineResultDTO
-from app.utils.json_safe import json_safe
+from cross_document_validation.services.dto import CaseInput, Decision, DocType
+from cross_document_validation.services.dto import PipelineResult as PipelineResultDTO
+from cross_document_validation.utils.json_safe import json_safe
 from db.models.case import Case, CaseStatus
 from db.models.document import Document
 from db.models.golden_record import GoldenRecord as GoldenRecordModel

@@ -3,10 +3,10 @@ Aadhaar, PAN, DOB. Also enforces that mandatory identity fields exist on
 the Golden Record at all, regardless of why they're missing.
 """
 
-from app.matching import exact, fuzzy
-from app.matching.embeddings import address_similarity
-from app.services import validation_config as cfg
-from app.services.dto import CaseInput, CheckType, GoldenRecord, ValidationResult
+from cross_document_validation.matching import exact, fuzzy
+from cross_document_validation.matching.embeddings import address_similarity
+from cross_document_validation.services import validation_config as cfg
+from cross_document_validation.services.dto import CaseInput, CheckType, GoldenRecord, ValidationResult
 
 MANDATORY_GOLDEN_FIELDS = {
     CheckType.NAME: "name",
@@ -31,7 +31,9 @@ def check_mandatory_presence(golden: GoldenRecord) -> list[ValidationResult]:
     return results
 
 
-def _exact_result_to_validation(check_type: CheckType, outcome, document_id: str) -> ValidationResult:
+def _exact_result_to_validation(
+    check_type: CheckType, outcome, document_id: str, source_text, target_text
+) -> ValidationResult:
     passed = outcome.result == exact.MatchResult.MATCH
     score = 100.0 if passed else (50.0 if outcome.result == exact.MatchResult.INCONCLUSIVE else 0.0)
     return ValidationResult(
@@ -40,6 +42,7 @@ def _exact_result_to_validation(check_type: CheckType, outcome, document_id: str
         score=score,
         document_id=document_id,
         failure_reason=None if passed else outcome.reason,
+        evidence={"source_text": source_text, "target_text": target_text, "match_type": "EXACT"},
     )
 
 
@@ -64,6 +67,7 @@ def validate_document_against_golden(
                 score=score,
                 document_id=document_id,
                 failure_reason=None if passed else "name_below_threshold",
+                evidence={"source_text": golden.name, "target_text": doc_name, "match_type": "FUZZY"},
             )
         )
 
@@ -78,20 +82,31 @@ def validate_document_against_golden(
                 score=score,
                 document_id=document_id,
                 failure_reason=None if passed else "address_below_threshold",
+                evidence={"source_text": golden.address, "target_text": doc_address, "match_type": "SEMANTIC"},
             )
         )
 
     if doc_aadhaar is not None:
         outcome = exact.aadhaar_match(golden.aadhaar_number, doc_aadhaar)
-        results.append(_exact_result_to_validation(CheckType.AADHAAR, outcome, document_id))
+        results.append(
+            _exact_result_to_validation(
+                CheckType.AADHAAR, outcome, document_id, golden.aadhaar_number, doc_aadhaar
+            )
+        )
 
     if doc_pan is not None:
         outcome = exact.pan_match(golden.pan_number, doc_pan)
-        results.append(_exact_result_to_validation(CheckType.PAN, outcome, document_id))
+        results.append(
+            _exact_result_to_validation(CheckType.PAN, outcome, document_id, golden.pan_number, doc_pan)
+        )
 
     if doc_dob is not None:
         outcome = exact.dob_match(golden.date_of_birth, doc_dob)
-        results.append(_exact_result_to_validation(CheckType.DOB, outcome, document_id))
+        results.append(
+            _exact_result_to_validation(
+                CheckType.DOB, outcome, document_id, golden.date_of_birth, doc_dob
+            )
+        )
 
     return results
 

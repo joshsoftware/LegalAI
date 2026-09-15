@@ -92,14 +92,37 @@ Notes:
       "passed": true,
       "score": 94.5,
       "document_id": "PAN",
-      "evidence": null
+      "evidence": {
+        "source_text": "Sneha Sunil Lokhande",
+        "target_text": "Sneha Lokhande",
+        "match_type": "FUZZY"
+      }
     },
     {
       "check_type": "SALARY_DATE",
       "passed": false,
       "score": 0.0,
       "document_id": "SALARY_SLIP-3",
-      "evidence": { "window": ["2026-05-27", "2026-07-31"] }
+      "evidence": {
+        "source_text": "June 2026",
+        "target_text": null,
+        "match_type": "DATE_MATCH",
+        "window": ["2026-05-27", "2026-07-31"]
+      }
+    },
+    {
+      "check_type": "SALARY_CREDIT_COUNT",
+      "passed": false,
+      "score": 75.0,
+      "document_id": "BANK_STATEMENT",
+      "evidence": {
+        "source_value": 4,
+        "target_value": 3,
+        "match_type": "COUNT_MATCH",
+        "stmt_duration": { "start": "2026-04-01", "end": "2026-07-04" },
+        "total_slips": 4,
+        "confidence_score": 75.0
+      }
     }
   ]
 }
