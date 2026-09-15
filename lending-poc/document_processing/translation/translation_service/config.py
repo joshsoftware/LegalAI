@@ -8,6 +8,7 @@ To change domain  : change DEFAULT_DOMAIN to "legal" or "banking".
 Nothing outside this file needs to change for those operations.
 """
 
+import os
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -67,7 +68,7 @@ def get_kb_path(domain: str) -> Path:
 MODEL_ADAPTER = "ollama"
 
 # Model identifier passed to the chosen adapter.
-MODEL_NAME = "gemma4:e4b"
+MODEL_NAME = os.getenv("OLLAMA_MODEL", "gemma4:e4b-it-qat")
 
 # ---------------------------------------------------------------------------
 # Model options  (adapter-specific — passed through as-is)

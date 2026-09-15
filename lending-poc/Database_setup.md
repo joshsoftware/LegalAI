@@ -20,7 +20,7 @@ pip install -e ".[dev]"
 Create a `.env` file in the project root:
 
 ```bash
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:55432/lending_poc
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:55439/lending_poc
 ENCRYPTION_KEY=<32-byte base64 key>
 DEBUG=true
 ```
@@ -39,7 +39,7 @@ python3 -c "import base64, os; print(base64.b64encode(os.urandom(32)).decode())"
 docker compose up -d db
 ```
 
-This starts Postgres with pgvector on host port `55432` (mapped from container port `5432`), and waits until it reports healthy.
+This starts Postgres with pgvector on host port `55439` (mapped from container port `5432`), and waits until it reports healthy.
 
 ## 4. Run database migrations
 

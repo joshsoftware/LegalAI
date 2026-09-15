@@ -3,6 +3,7 @@ __pycache__/
 *.pyo
 .venv/
 .env
+**/.env
 *.egg-info/
 dist/
 build/
@@ -10,3 +11,7 @@ build/
 .pytest_cache/
 .ruff_cache/
 venv/
+**/.venv/
+.venv-windows/
+local.env
+*.log

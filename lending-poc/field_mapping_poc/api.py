@@ -5,7 +5,7 @@ Provides REST API endpoints for mapping OCR text to a target JSON schema.
 Built as a wrapper around the existing FieldMapper.
 
 Usage:
-    uvicorn api:app --host 0.0.0.0 --port 8000 --reload
+    uvicorn api:app --host 0.0.0.0 --port 8002 --reload
 
 Endpoints:
     POST /map     - Map OCR text to the provided JSON schema
@@ -109,6 +109,6 @@ if __name__ == "__main__":
     uvicorn.run(
         "api:app",
         host="0.0.0.0",
-        port=8000,
+        port=8002,
         reload=True
     )

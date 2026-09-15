@@ -200,6 +200,28 @@ make status            # Show project status
 ### Prerequisites
 - Python 3.11+
 - macOS/Linux (Surya requires local inference backend)
+- A Surya inference backend: on CPU-only WSL install `llama.cpp` so that
+  `llama-server` is on `PATH`; on an NVIDIA WSL setup configure Surya's vLLM
+  backend and Docker/GPU passthrough. The API now verifies this at startup,
+  before reporting `/health` as healthy.
+
+### Running via Docker Compose (GPU or CPU)
+
+The top-level `docker-compose.yml` runs this service (and its `surya-inference`
+backend) in a CPU or GPU variant, picked by `COMPOSE_PROFILES` in `.env`:
+
+- `COMPOSE_PROFILES=cpu` (default) — always works, no GPU required.
+- `COMPOSE_PROFILES=gpu` — requires an NVIDIA GPU on the host plus the
+  [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+  (and, on Windows, WSL2 GPU passthrough). Both containers detect GPU access
+  at startup and fall back to CPU automatically if it isn't actually there,
+  so setting the profile without a working toolkit degrades to CPU rather
+  than failing outright — but `docker compose up` itself will fail to create
+  the containers if the toolkit isn't installed at all, since the GPU device
+  reservation can't be satisfied.
+
+Switch profiles by editing `COMPOSE_PROFILES` in `lending-poc/.env`, then
+`docker compose up --build`.
 
 ### Dependencies
 
