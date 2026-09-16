@@ -115,9 +115,7 @@ class OllamaAdapter(ModelAdapter):
     def _ping(self) -> None:
         """
         Blocking probe shared by health_check() (CLI) and the background
-        monitor (server). Short connect, generous read — see the module
-        docstring and the client construction in __init__.
-
+        monitor (server). Deliberately untimed — see module docstring.
         Uses the same model_options as translate() (only num_predict is
         overridden) so the ping never causes Ollama to reload the model with
         a different context size than real translate calls use — a mismatch

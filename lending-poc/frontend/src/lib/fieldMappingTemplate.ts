@@ -10,8 +10,11 @@ export const FIELD_MAPPING_TEMPLATE: FieldMappingTemplate = [
   {
     document_type: 'salary_slip',
     document_metadata: {
-      document_date: '',
-      period: { from: 'Mandatory', to: 'Mandatory' },
+      document_date: 'date (YYYY-MM-DD)',
+      period: {
+        from: 'Mandatory, date (YYYY-MM-DD)',
+        to: 'Mandatory, date (YYYY-MM-DD)',
+      },
       currency: '',
     },
     employer: { name: 'Mandatory' },
@@ -34,7 +37,11 @@ export const FIELD_MAPPING_TEMPLATE: FieldMappingTemplate = [
       retirement_contribution: null,
       other: null,
     },
-    net_salary: { amount: 'Mandatory', currency: 'Mandatory', amount_in_words: '' },
+    net_salary: {
+      amount: 'Mandatory, number (no currency symbol or thousands separators)',
+      currency: 'Mandatory',
+      amount_in_words: '',
+    },
   },
   {
     document_type: 'bank_statement',
@@ -53,11 +60,16 @@ export const FIELD_MAPPING_TEMPLATE: FieldMappingTemplate = [
     },
     transactions: [
       {
-        transaction_date: '',
-        description: 'Josh Software',
-        amount: null,
+        transaction_date: 'date (YYYY-MM-DD)',
+        // Was a real company name ("Josh Software"), which a model can copy
+        // straight into its output — that then feeds employer-narration
+        // matching during validation.
+        description: 'string (transaction narration exactly as printed)',
+        amount: 'number (positive magnitude; use direction for credit/debit)',
         currency: '',
-        direction: 'Credited/Debited',
+        // Kept as a word rather than a sign because that is how statements
+        // print it; the frontend mapper folds it into the amount's sign.
+        direction: "'Credited' or 'Debited'",
         balance: null,
       },
     ],
@@ -71,14 +83,14 @@ export const FIELD_MAPPING_TEMPLATE: FieldMappingTemplate = [
   {
     document_type: 'aadhaar',
     name: 'Mandatory',
-    date_of_birth: 'Mandatory',
+    date_of_birth: 'Mandatory, date (YYYY-MM-DD)',
     aadhaar_number: 'Mandatory',
     address: 'Mandatory',
   },
   {
     document_type: 'pan',
     name: 'Mandatory',
-    date_of_birth: 'Mandatory',
+    date_of_birth: 'Mandatory, date (YYYY-MM-DD)',
     pan_number: 'Mandatory',
   },
 ]

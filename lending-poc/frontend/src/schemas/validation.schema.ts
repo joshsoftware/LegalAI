@@ -4,14 +4,18 @@ import { z } from 'zod'
 
 export const bankTransactionInSchema = z.object({
   narration: z.string().nullable().optional(),
-  amount: z.number().nullable().optional(),
+  // Strings are allowed for the same reason as net_salary below: field
+  // mapping returns amounts as printed ("75,000"), and the backend
+  // normalizes them. Dropping them here would lose the transaction silently.
+  amount: z.union([z.number(), z.string()]).nullable().optional(),
   date: z.string().nullable().optional(),
 })
 
 export const aadhaarFieldsInSchema = z.object({
   name: z.string().nullable().optional(),
   address: z.string().nullable().optional(),
-  aadhaar_number: z.string().nullable().optional(),
+  // An all-digit Aadhaar number may come back unquoted from field mapping.
+  aadhaar_number: z.union([z.string(), z.number()]).nullable().optional(),
   date_of_birth: z.string().nullable().optional(),
 })
 

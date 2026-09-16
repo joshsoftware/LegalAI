@@ -16,14 +16,21 @@ from pydantic import BaseModel, Field
 
 class BankTransactionIn(BaseModel):
     narration: str | None = None
-    amount: float | None = None
+    # Widened to accept strings for the same reason as net_salary below: the
+    # values come from an LLM reading a document, so "75,000" and "Rs. 75,000"
+    # are normal. Rejecting them here would 422 before parse_case could
+    # normalize them.
+    amount: float | str | None = None
     date: str | None = None
 
 
 class AadhaarFieldsIn(BaseModel):
     name: str | None = None
     address: str | None = None
-    aadhaar_number: str | None = None
+    # An Aadhaar number is all digits, so an LLM may well emit it unquoted.
+    # Pydantic v2 does not coerce int -> str, so without `int` here that
+    # 422s; parse_case stringifies it.
+    aadhaar_number: str | int | None = None
     date_of_birth: str | None = None
 
 
