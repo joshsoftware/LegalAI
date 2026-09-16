@@ -1,6 +1,11 @@
 """Checks employer + salary consistency between salary slips and the bank
 statement. No specific payroll day is assumed anywhere: each slip is
 matched against bank transactions inside a broad, month-level window.
+
+A slip is evidence for exactly one month -- its own. Statement months with
+no submitted slip are reported as missing (SALARY_CONTINUITY) rather than
+checked against a neighbouring slip's declared salary, which would let one
+slip stand in as income evidence for a month it says nothing about.
 """
 
 from calendar import monthrange
@@ -38,12 +43,6 @@ def _month_window(salary_month: date) -> tuple[date, date]:
     last_day = monthrange(window_end_month.year, window_end_month.month)[1]
     window_end = date(window_end_month.year, window_end_month.month, last_day)
     return window_start, window_end
-
-
-def _calendar_month_range(month: date) -> tuple[date, date]:
-    """First and last calendar day of `month` (must be first-of-month)."""
-    last_day = monthrange(month.year, month.month)[1]
-    return date(month.year, month.month, 1), date(month.year, month.month, last_day)
 
 
 def _split_into_months(start: date, end: date) -> list[date]:
@@ -245,101 +244,67 @@ def _salary_credit_count(
     )
 
 
-def _gap_months_for_slip(
-    slip: SalarySlipDoc,
-    next_slip: SalarySlipDoc | None,
-    bank_statement: BankStatementDoc,
-) -> list[date]:
-    """Calendar months `slip` is responsible for under the SALARY_CONTINUITY
-    rule: the gap between its own window end and either `next_slip`'s own
-    window start (chronologically consecutive pair), or -- when `next_slip`
-    is None, meaning `slip` is the latest dated slip -- the end of bank
-    statement coverage (the month of the latest txn_date).
+def _statement_months(bank_statement: BankStatementDoc) -> list[date]:
+    """Calendar months the statement covers, as first-of-month dates.
+
+    A trailing partial month is excluded: the statement was pulled part-way
+    through it, so that month's slip has not been issued yet and reporting it
+    as missing would penalise an applicant for a document that cannot exist.
+    A partial LEADING month is kept -- its slip was issued long ago.
+
+    The period is inferred from transaction dates because BankStatementDoc
+    carries no declared statement period (the same inference
+    _salary_credit_count makes for stmt_duration). A statement that happens
+    to have no transactions in its final days therefore looks partial, which
+    errs toward reporting nothing -- the safe direction.
     """
-    _, window_end = _month_window(slip.salary_month)
-    gap_start = window_end + timedelta(days=1)
+    txn_dates = [t.txn_date for t in bank_statement.transactions if t.txn_date is not None]
+    if not txn_dates:
+        return []
 
-    if next_slip is not None:
-        next_window_start, _ = _month_window(next_slip.salary_month)
-        gap_end = next_window_start - timedelta(days=1)
-    else:
-        txn_dates = [t.txn_date for t in bank_statement.transactions if t.txn_date is not None]
-        if not txn_dates:
-            return []
-        gap_end = max(txn_dates)
-
-    return _split_into_months(gap_start, gap_end)
+    last = max(txn_dates)
+    months = _split_into_months(min(txn_dates), last)
+    if months and last.day < monthrange(last.year, last.month)[1]:
+        months.pop()
+    return months
 
 
-def _validate_continuity_month(
-    slip: SalarySlipDoc,
-    month: date,
-    bank_statement: BankStatementDoc,
-    used_transaction_ids: set[int],
-) -> ValidationResult:
-    """One SALARY_CONTINUITY result for a single uncovered calendar `month`,
-    using `slip` (the responsible slip under the gap-assignment rule) as the
-    reference for expected employer/amount. Mirrors _validate_salary_slip's
-    matching logic, scoped to one calendar month, sharing the same
-    used_transaction_ids set so a credit already claimed elsewhere can't be
-    claimed again here.
+def _months_with_a_slip(salary_slips: list[SalarySlipDoc]) -> set[date]:
+    """Months the applicant actually submitted a slip for: each slip's own
+    salary_month, deliberately NOT its matching window.
+
+    _month_window is wide (buffer days either side, plus an extra month) only
+    to tolerate payroll landing late. Reusing it as coverage would convert a
+    payment-timing tolerance into an evidence claim, letting a March slip
+    vouch for April -- a quieter form of the cross-month matching this check
+    replaced.
     """
-    if slip.net_salary is None:
-        return ValidationResult(
-            check_type=CheckType.SALARY_CONTINUITY,
-            passed=False,
-            score=0.0,
-            document_id=slip.doc_id,
-            failure_reason="anchor_slip_missing_net_salary",
-            evidence={"month": month},
-        )
-
-    month_range = _calendar_month_range(month)
-    candidates = [
-        txn
-        for txn in _candidate_transactions(month_range, bank_statement.transactions, slip.net_salary)
-        if id(txn) not in used_transaction_ids
-    ]
-    selection = _select_best_transaction(candidates, slip.employer_name, slip.net_salary)
-
-    if selection is None:
-        return ValidationResult(
-            check_type=CheckType.SALARY_CONTINUITY,
-            passed=False,
-            score=0.0,
-            document_id=slip.doc_id,
-            failure_reason="no_matching_credit_in_month",
-            evidence={"month": month},
-        )
-
-    txn, score = selection
-    used_transaction_ids.add(id(txn))
-    return ValidationResult(
-        check_type=CheckType.SALARY_CONTINUITY,
-        passed=True,
-        score=score,
-        document_id=slip.doc_id,
-        evidence={"month": month, "matched_transaction": txn},
-    )
+    return {slip.salary_month for slip in salary_slips if slip.salary_month is not None}
 
 
-def _salary_continuity_checks(
-    ordered_slips: list[SalarySlipDoc],
-    bank_statement: BankStatementDoc,
-    used_transaction_ids: set[int],
+def _missing_slip_checks(
+    salary_slips: list[SalarySlipDoc], bank_statement: BankStatementDoc
 ) -> list[ValidationResult]:
-    """Runs after all per-slip SALARY_DATE matching is complete, reusing the
-    same used_transaction_ids set so a credit already claimed by a slip's own
-    window can't also be claimed here. Slips without a salary_month have no
-    window to anchor a gap and are excluded.
+    """One result per statement month with no submitted slip.
+
+    This reports a documentation gap, not a suspicion about income: it makes
+    no attempt to infer what the applicant earned in an uncovered month. It
+    reads no transactions at all, so it can never claim a bank credit -- a
+    slip's own window match stays the only thing that consumes one.
     """
-    dated_slips = [s for s in ordered_slips if s.salary_month is not None]
-    results: list[ValidationResult] = []
-    for i, slip in enumerate(dated_slips):
-        next_slip = dated_slips[i + 1] if i + 1 < len(dated_slips) else None
-        for month in _gap_months_for_slip(slip, next_slip, bank_statement):
-            results.append(_validate_continuity_month(slip, month, bank_statement, used_transaction_ids))
-    return results
+    covered = _months_with_a_slip(salary_slips)
+    return [
+        ValidationResult(
+            check_type=CheckType.SALARY_CONTINUITY,
+            passed=False,
+            score=0.0,
+            document_id=None,  # no slip exists to attribute this to -- that IS the finding
+            failure_reason="no_salary_slip_for_month",
+            evidence={"month": month},
+        )
+        for month in _statement_months(bank_statement)
+        if month not in covered
+    ]
 
 
 def run_business_validation(case: CaseInput) -> list[ValidationResult]:
@@ -366,8 +331,6 @@ def run_business_validation(case: CaseInput) -> list[ValidationResult]:
 
     results.append(_salary_credit_count(case.salary_slips, case.bank_statement, slip_results))
 
-    # Runs last so it only claims transactions left over after every slip's
-    # own SALARY_DATE match.
-    results.extend(_salary_continuity_checks(ordered_slips, case.bank_statement, used_transaction_ids))
+    results.extend(_missing_slip_checks(case.salary_slips, case.bank_statement))
 
     return results

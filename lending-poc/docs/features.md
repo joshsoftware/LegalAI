@@ -91,6 +91,16 @@ Each slip's declared `employer_name` is compared — via fuzzy similarity — on
 
 An aggregate check: `matched_slips / total_slips × 100`. It passes only if *every* slip matched a transaction, but a partial match (e.g. 3 of 4 months) doesn't hard-fail the case — it only lowers this component's score, which feeds into the weighted overall score. Evidence includes the bank statement's observed date range and match counts.
 
+### 4.4 Missing salary slips (`SALARY_CONTINUITY` check)
+
+Reports every calendar month the bank statement covers for which **no salary slip was submitted**. A month counts as covered by a slip's own `salary_month` — deliberately *not* by its §4.1 search window, which is wide only to tolerate late payroll and would otherwise let a March slip vouch for April, a month it says nothing about.
+
+This check makes no inference about income: it does not look for a credit in the uncovered month, and does not borrow a neighbouring slip's declared salary or employer as the expected value. It reads no transactions at all, which means it can never claim a bank credit — §4.1 remains the only thing that consumes one.
+
+A **trailing partial month is excluded**. If the statement's last transaction falls before that month ends, the month is still in progress and its slip cannot have been issued yet, so reporting it would penalise an otherwise complete submission. A partial *leading* month is still required. The statement period is inferred from transaction dates (`BankStatementDoc` carries no declared period, the same inference §4.3 makes for `stmt_duration`), so a statement with no activity in its final days reads as partial — the inference errs toward reporting nothing.
+
+Each reported month emits `passed=False`, `score=0.0`, `document_id=None` (no slip exists to attribute it to) and `failure_reason="no_salary_slip_for_month"`, with the month in `evidence`. Because every result scores 0, this check's component mean is always 0 whenever it runs: it is a **binary penalty** (~14 points with every other check at 100), not one that scales with the number of missing months.
+
 ## 5. Scoring (`app/services/scoring.py`)
 
 Given every `ValidationResult` produced above:
