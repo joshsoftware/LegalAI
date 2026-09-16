@@ -15,7 +15,7 @@ from enum import Enum
 class DocType(str, Enum):
     AADHAAR = "AADHAAR"
     PAN = "PAN"
-    ADDRESS_PROOF = "ADDRESS_PROOF"
+    ADDRESS_PROOF = "ADDRESS_PROOF"  # retired; mirrors the DB enum, see db/models/enums.py
     SALARY_SLIP = "SALARY_SLIP"
     BANK_STATEMENT = "BANK_STATEMENT"
 
@@ -53,15 +53,11 @@ class AadhaarDoc:
 class PanDoc:
     name: str | None = None
     pan_number: str | None = None
+    # PAN cards print a DOB too, which makes it the one identity field
+    # besides name that two documents can genuinely disagree about.
+    date_of_birth: date | None = None
     source_file_ref: str | None = None
     doc_id: str = "PAN"
-
-
-@dataclass
-class AddressProofDoc:
-    address: str | None = None
-    source_file_ref: str | None = None
-    doc_id: str = "ADDRESS_PROOF"
 
 
 @dataclass
@@ -94,7 +90,6 @@ class CaseInput:
     applicant_ref: str
     aadhaar: AadhaarDoc | None = None
     pan: PanDoc | None = None
-    address_proof: AddressProofDoc | None = None
     salary_slips: list[SalarySlipDoc] = field(default_factory=list)
     bank_statement: BankStatementDoc | None = None
 
@@ -104,8 +99,6 @@ class CaseInput:
             present.add(DocType.AADHAAR.value)
         if self.pan:
             present.add(DocType.PAN.value)
-        if self.address_proof:
-            present.add(DocType.ADDRESS_PROOF.value)
         if self.salary_slips:
             present.add(DocType.SALARY_SLIP.value)
         if self.bank_statement:
@@ -122,7 +115,6 @@ class GoldenRecord:
     last_name: str | None = None
     address: str | None = None
     address_source: str | None = None
-    address_embedding: list[float] = field(default_factory=list)
     date_of_birth: date | None = None
     dob_source: str | None = None
     aadhaar_number: str | None = None

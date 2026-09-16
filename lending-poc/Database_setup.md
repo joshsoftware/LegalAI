@@ -1,10 +1,10 @@
 # lending-poc
 
-Lending POC backend — FastAPI + PostgreSQL (pgvector).
+Lending POC backend — FastAPI + PostgreSQL.
 
 ## Requirements
 
-- Docker (for PostgreSQL via `pgvector/pgvector:pg16`) — or a local Postgres with the `pgvector` extension
+- Docker (for PostgreSQL via `postgres:16`) — or any local Postgres 16
 - `pip`
 
 ## 1. Clone and set up a virtualenv
@@ -39,7 +39,7 @@ python3 -c "import base64, os; print(base64.b64encode(os.urandom(32)).decode())"
 docker compose up -d db
 ```
 
-This starts Postgres with pgvector on host port `55439` (mapped from container port `5432`), and waits until it reports healthy.
+This starts Postgres on host port `55439` (mapped from container port `5432`), and waits until it reports healthy.
 
 ## 4. Run database migrations
 

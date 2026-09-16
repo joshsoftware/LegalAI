@@ -25,7 +25,7 @@ Two design rules matter more than the parsing itself:
 
 Deliberately stdlib-only and context-free (it knows nothing about documents
 or fields) so it stays cheap to unit-test -- importing it must not drag in
-app.config, the database, or the sentence-transformers model. `case_parsing`
+app.config or the database. `case_parsing`
 attaches the document/field context.
 """
 
