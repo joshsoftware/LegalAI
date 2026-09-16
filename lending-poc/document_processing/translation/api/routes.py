@@ -54,6 +54,14 @@ def _get_service(request: Request, domain: str):
 # Health
 # ---------------------------------------------------------------------------
 
+# Human-readable detail shown alongside HealthResponse.status.
+STATUS_DETAIL = {
+    "unreachable": "Ollama is unreachable.",
+    "initializing": "Ollama reachable — waiting for the model to respond.",
+    "ok": "Model is loaded and responding.",
+}
+
+
 @router.get(
     "/health",
     response_model=HealthResponse,
@@ -62,9 +70,11 @@ def _get_service(request: Request, domain: str):
 )
 async def health(request: Request):
     """Returns model reachability and KB sizes for all loaded domains."""
-    # Check health via the default domain service (one model shared across all)
+    # Check health via the default domain service (one model shared across all).
+    # health_status() is an instant, non-blocking read of state tracked by a
+    # background monitor — it never calls Ollama itself (see ollama_adapter.py).
     default_service = request.app.state.services[DEFAULT_DOMAIN]
-    reachable = default_service.health_check()
+    status = default_service.health_status()
 
     kb_entries = {
         domain: svc.kb_size()
@@ -72,7 +82,8 @@ async def health(request: Request):
     }
 
     return HealthResponse(
-        status="ok" if reachable else "degraded",
+        status=status,
+        detail=STATUS_DETAIL[status],
         model=MODEL_NAME,
         adapter=MODEL_ADAPTER,
         domains=SUPPORTED_DOMAINS,

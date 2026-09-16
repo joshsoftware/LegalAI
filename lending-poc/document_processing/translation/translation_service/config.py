@@ -70,6 +70,22 @@ MODEL_ADAPTER = "ollama"
 # Model identifier passed to the chosen adapter.
 MODEL_NAME = os.getenv("OLLAMA_MODEL", "gemma4:e4b-it-qat")
 
+# Background /health monitor timing (see OllamaAdapter._monitor_loop). The
+# monitor pings Ollama with a real chat() call, untimed, on a background task
+# — never inline in a request — so these control retry/recheck cadence only,
+# never a request timeout.
+#
+# Fast retry interval while consecutive failures are within the limit below.
+OLLAMA_HEALTH_RETRY_SECONDS = float(os.getenv("OLLAMA_HEALTH_RETRY_SECONDS", "5"))
+# How many consecutive failures before backing off to the slower interval.
+OLLAMA_HEALTH_MAX_FAST_RETRIES = int(os.getenv("OLLAMA_HEALTH_MAX_FAST_RETRIES", "12"))
+# Slow retry interval once the fast-retry budget is exhausted — keeps trying
+# forever, just less aggressively, so the service self-heals without a restart.
+OLLAMA_HEALTH_BACKOFF_SECONDS = float(os.getenv("OLLAMA_HEALTH_BACKOFF_SECONDS", "120"))
+# Reconfirmation interval once status is "ok", so a later Ollama outage is
+# eventually reflected again instead of leaving /health stuck on stale "ok".
+OLLAMA_HEALTH_RECHECK_SECONDS = float(os.getenv("OLLAMA_HEALTH_RECHECK_SECONDS", "30"))
+
 # ---------------------------------------------------------------------------
 # Model options  (adapter-specific — passed through as-is)
 # ---------------------------------------------------------------------------

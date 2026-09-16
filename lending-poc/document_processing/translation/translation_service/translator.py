@@ -112,6 +112,18 @@ class TranslationService:
         """Delegate health check to the underlying model adapter."""
         return self._adapter.health_check()
 
+    def health_status(self) -> str:
+        """Delegate the non-blocking health status read to the underlying adapter."""
+        return self._adapter.health_status()
+
+    async def start_health_monitor(self) -> None:
+        """Delegate starting the background health monitor to the underlying adapter."""
+        await self._adapter.start_monitoring()
+
+    async def stop_health_monitor(self) -> None:
+        """Delegate stopping the background health monitor to the underlying adapter."""
+        await self._adapter.stop_monitoring()
+
     def kb_size(self) -> int:
         """Return the number of terminology entries loaded from the KB."""
         return len(self._kb)
