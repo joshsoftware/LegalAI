@@ -160,8 +160,7 @@ services:
       # abort it) but not far past the gateway timeout, since past that
       # the call still holds field-mapping's request lock with nobody waiting.
       # See the matching comment on request_timeout in field_mapping_poc/config.py.
-      # TEMP(slow-host testing): raised from 600 to 1800. Revert before merging.
-      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-1800}
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-600}
       SURYA_INFERENCE_URL: http://surya-inference:8000/v1
       SURYA_INFERENCE_AUTOSTART: "false"
       APP_BASE_URL: http://127.0.0.1:8000
@@ -172,11 +171,11 @@ services:
       # minutes (OCR to Surya, translation/field-mapping to Ollama) — these match
       # the timeouts the frontend already budgets for the same calls, so the
       # gateway is never the first link in the chain to give up.
-      # TEMP(slow-host testing): raised from 300 to 1800. Revert before merging.
-      OCR_REQUEST_TIMEOUT_SECONDS: ${OCR_REQUEST_TIMEOUT_SECONDS:-1800}
-      TRANSLATION_REQUEST_TIMEOUT_SECONDS: ${TRANSLATION_REQUEST_TIMEOUT_SECONDS:-1800}
-      FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS: ${FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS:-1800}
-      APP_REQUEST_TIMEOUT_SECONDS: ${APP_REQUEST_TIMEOUT_SECONDS:-1800}
+      OCR_REQUEST_TIMEOUT_SECONDS: ${OCR_REQUEST_TIMEOUT_SECONDS:-300}
+      TRANSLATION_REQUEST_TIMEOUT_SECONDS: ${TRANSLATION_REQUEST_TIMEOUT_SECONDS:-300}
+      FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS: ${FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS:-300}
+      APP_REQUEST_TIMEOUT_SECONDS: ${APP_REQUEST_TIMEOUT_SECONDS:-300}
+      GATEWAY_CLIENT_TIMEOUT_SECONDS: ${GATEWAY_CLIENT_TIMEOUT_SECONDS:-120}
     volumes:
       - .:/app
       # OCR (surya-ocr) pulls its models from the HuggingFace hub on first

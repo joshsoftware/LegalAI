@@ -31,9 +31,7 @@ class OllamaConfig:
     #     still holds _map_lock, blocking every other /map caller.
     # Raise it (env) for slower hosts or larger models, where a legitimate
     # load could otherwise cross it.
-    # TEMP(slow-host testing): raised from 600s to 1800s, matching the
-    # gateway's raised proxy timeout. Revert before merging.
-    request_timeout: int = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "1800"))
+    request_timeout: int = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "600"))
     max_retries: int = int(os.getenv("OLLAMA_MAX_RETRIES", "2"))
 
 

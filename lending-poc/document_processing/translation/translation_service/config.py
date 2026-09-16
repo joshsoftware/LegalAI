@@ -91,9 +91,7 @@ OLLAMA_PING_CONNECT_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_PING_CONNECT_TIMEO
 # So a large enough document could hit this ceiling and be cut off mid-answer,
 # discarding real work. If long translations start failing at this ceiling,
 # this is the knob — raise it rather than assuming Ollama is broken.
-# TEMP(slow-host testing): raised from 600s to 1800s, matching the gateway's
-# raised proxy timeout. Revert before merging.
-OLLAMA_REQUEST_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "1800"))
+OLLAMA_REQUEST_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "600"))
 # Fast retry interval while consecutive failures are within the limit below.
 OLLAMA_HEALTH_RETRY_SECONDS = float(os.getenv("OLLAMA_HEALTH_RETRY_SECONDS", "5"))
 # How many consecutive failures before backing off to the slower interval.
