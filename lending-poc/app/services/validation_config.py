@@ -41,10 +41,17 @@ VALIDATION_WEIGHTS = {
     "DOB": 0.10,
     "EMPLOYER": 0.10,
     "SALARY_CREDIT_COUNT": 0.25,
+    # Reports statement months the applicant submitted no salary slip for.
+    #
     # Deliberately not carved out of SALARY_CREDIT_COUNT's weight: compute_score
     # renormalizes by the weight of check types actually present in a case's
-    # results, so a case with zero SALARY_CONTINUITY results (no gap months
-    # detected) is scored identically to before this check type existed.
+    # results, so a case whose slips cover every statement month emits no
+    # SALARY_CONTINUITY results and is scored identically to before this check
+    # type existed.
+    #
+    # Every missing month scores 0.0, so this check's mean is 0.0 whenever it
+    # runs at all: it is a binary penalty (~14 points with every other check
+    # at 100), not one that scales with how many months are missing.
     "SALARY_CONTINUITY": 0.10,
 }
 
