@@ -19,6 +19,7 @@ from typing import Any, Dict
 import os
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.concurrency import run_in_threadpool
 import uvicorn
@@ -29,6 +30,13 @@ from extractor.loader import SUPPORTED_EXTENSIONS
 # Initialize extractor (reused across requests for efficiency)
 extractor = Extractor(engine=DEFAULT_ENGINE)
 
+# Base URL for the liveness probe in monitor_readiness() below - derived from
+# SURYA_INFERENCE_URL since that already points at the right host/port.
+_SURYA_INFERENCE_URL = os.getenv("SURYA_INFERENCE_URL", "http://surya-inference:8000/v1")
+SURYA_HEALTH_URL = _SURYA_INFERENCE_URL.removesuffix("/v1") + "/health"
+LIVENESS_PROBE_INTERVAL_SECONDS = float(os.getenv("SURYA_LIVENESS_PROBE_INTERVAL_SECONDS", "10"))
+LIVENESS_PROBE_TIMEOUT_SECONDS = float(os.getenv("SURYA_LIVENESS_PROBE_TIMEOUT_SECONDS", "5"))
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -36,7 +44,15 @@ async def lifespan(app: FastAPI):
     app.state.ocr_ready = False
     app.state.ocr_error = None
 
-    async def warm_up() -> None:
+    async def monitor_readiness() -> None:
+        """Run Surya's one-time startup check, then keep polling its liveness.
+
+        The initial warm-up and the recurring probe both drive the same
+        ocr_ready/ocr_error flags, so they run one after another in a single
+        task rather than as two tasks racing to write that state - otherwise
+        an early probe result could mark the API ready before warm-up has
+        actually validated Surya's inference backend.
+        """
         try:
             await run_in_threadpool(extractor.engine.warm_up)
         except Exception as exc:
@@ -47,13 +63,32 @@ async def lifespan(app: FastAPI):
         else:
             app.state.ocr_ready = True
 
-    warm_up_task = asyncio.create_task(warm_up())
+        # Surya's own inference backend (llama-server) exposes a lightweight
+        # /health endpoint that answers instantly without running the model,
+        # so polling it here can't collide with the segfault-on-concurrency
+        # issue _extract_lock guards against. Each check stands on its own -
+        # the most recent result is what ocr_ready/ocr_error reflect, with no
+        # retry/backoff smoothing.
+        while True:
+            await asyncio.sleep(LIVENESS_PROBE_INTERVAL_SECONDS)
+            try:
+                async with httpx.AsyncClient(timeout=LIVENESS_PROBE_TIMEOUT_SECONDS) as client:
+                    response = await client.get(SURYA_HEALTH_URL)
+                    response.raise_for_status()
+            except Exception as exc:
+                app.state.ocr_ready = False
+                app.state.ocr_error = str(exc)
+            else:
+                app.state.ocr_ready = True
+                app.state.ocr_error = None
+
+    monitor_task = asyncio.create_task(monitor_readiness())
     try:
         yield
     finally:
-        warm_up_task.cancel()
+        monitor_task.cancel()
         try:
-            await warm_up_task
+            await monitor_task
         except asyncio.CancelledError:
             pass
 

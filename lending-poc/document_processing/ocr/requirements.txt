@@ -7,3 +7,4 @@ pillow
 fastapi
 python-multipart
 uvicorn[standard]
+httpx
