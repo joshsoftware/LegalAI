@@ -17,7 +17,7 @@ from pathlib import Path
 
 # Directory containing .txt files produced by the OCR engine.
 # OCR service writes here → translation service reads from here.
-INPUT_DIR = Path("/Users/josh/Desktop/Josh/inovation_lab/surya_ocr_test/extraction_output/text")
+INPUT_DIR = Path(os.getenv("TRANSLATION_INPUT_DIR", "./extraction_output/text"))
 
 # Directory where translated .txt files are written (created automatically).
 OUTPUT_DIR = Path("./output")
@@ -109,9 +109,12 @@ OLLAMA_HEALTH_RECHECK_SECONDS = float(os.getenv("OLLAMA_HEALTH_RECHECK_SECONDS",
 
 MODEL_OPTIONS: dict = {
     # Maximum tokens the model will generate per document.
-    "num_predict": 16384,
+    "num_predict": int(os.getenv("TRANSLATION_NUM_PREDICT", "16384")),
     # Context window: must fit prompt + terminology block + full document.
-    "num_ctx": 32768,
+    # Shared with field_mapping_poc's OLLAMA_NUM_CTX (see config.py:17-19
+    # there) — a different num_ctx makes Ollama treat it as a different
+    # model runtime, forcing a reload on every call handoff between services.
+    "num_ctx": int(os.getenv("OLLAMA_NUM_CTX", "32768")),
 }
 
 # ---------------------------------------------------------------------------

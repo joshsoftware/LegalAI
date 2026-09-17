@@ -65,9 +65,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Lending POC Gateway", lifespan=lifespan)
 
+ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -130,7 +132,7 @@ async def create_case(request: Request) -> Response:
 # --- Per-service health (namespaced since all four modules define /health) ---
 # Liveness probes, not business calls — kept short regardless of the
 # per-service request timeouts above, matching the aggregate /health below.
-HEALTH_PROXY_TIMEOUT_SECONDS = 5.0
+HEALTH_PROXY_TIMEOUT_SECONDS = float(os.environ.get("HEALTH_PROXY_TIMEOUT_SECONDS", "5"))
 
 
 @app.get("/ocr/health")

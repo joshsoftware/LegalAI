@@ -66,8 +66,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# File size limit (50MB)
-MAX_FILE_SIZE = 50 * 1024 * 1024
+# File size limit (default 50MB)
+MAX_FILE_SIZE = int(os.getenv("MAX_UPLOAD_FILE_SIZE_MB", "50")) * 1024 * 1024
 
 # The Surya engine crashes (segfault) if invoked from more than one thread at
 # once, so concurrent /extract calls must queue rather than run in parallel.
