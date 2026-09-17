@@ -12,6 +12,8 @@ const envSchema = z.object({
   VITE_MAP_FIELDS_TIMEOUT_MS: z.coerce.number().positive().default(5 * 60 * 1000),
   // Translation calls a local LLM (Ollama) per request.
   VITE_TRANSLATE_TIMEOUT_MS: z.coerce.number().positive().default(5 * 60 * 1000),
+  // Must match the backend's MAX_UPLOAD_FILE_SIZE_MB (document_processing/ocr/api.py).
+  VITE_MAX_UPLOAD_FILE_SIZE_MB: z.coerce.number().positive().default(50),
 })
 
 export const env = envSchema.parse({
@@ -21,4 +23,5 @@ export const env = envSchema.parse({
   VITE_EXTRACT_TIMEOUT_MS: import.meta.env.VITE_EXTRACT_TIMEOUT_MS,
   VITE_MAP_FIELDS_TIMEOUT_MS: import.meta.env.VITE_MAP_FIELDS_TIMEOUT_MS,
   VITE_TRANSLATE_TIMEOUT_MS: import.meta.env.VITE_TRANSLATE_TIMEOUT_MS,
+  VITE_MAX_UPLOAD_FILE_SIZE_MB: import.meta.env.VITE_MAX_UPLOAD_FILE_SIZE_MB,
 })

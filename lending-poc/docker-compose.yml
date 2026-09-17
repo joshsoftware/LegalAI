@@ -161,7 +161,7 @@ services:
       # the call still holds field-mapping's request lock with nobody waiting.
       # See the matching comment on request_timeout in field_mapping_poc/config.py.
       OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-600}
-      SURYA_INFERENCE_URL: http://surya-inference:8000/v1
+      SURYA_INFERENCE_URL: ${SURYA_INFERENCE_URL:-http://surya-inference:8000/v1}
       SURYA_INFERENCE_AUTOSTART: "false"
       APP_BASE_URL: http://127.0.0.1:8000
       TRANSLATION_BASE_URL: http://127.0.0.1:8001
@@ -176,6 +176,8 @@ services:
       FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS: ${FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS:-300}
       APP_REQUEST_TIMEOUT_SECONDS: ${APP_REQUEST_TIMEOUT_SECONDS:-300}
       GATEWAY_CLIENT_TIMEOUT_SECONDS: ${GATEWAY_CLIENT_TIMEOUT_SECONDS:-120}
+      HEALTH_PROXY_TIMEOUT_SECONDS: ${HEALTH_PROXY_TIMEOUT_SECONDS:-5}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
     volumes:
       - .:/app
       # OCR (surya-ocr) pulls its models from the HuggingFace hub on first
