@@ -24,8 +24,10 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-lending_poc}
-    ports:
-      - "${POSTGRES_HOST_PORT:-55439}:5432"
+    # Not published to the host: `backend` reaches this as db:5432 over the
+    # Docker network. To attach a DB client, prefer an override file or an SSH
+    # tunnel over re-publishing here (a published port binds 0.0.0.0 and
+    # Docker's own iptables rules sit in front of the host firewall).
     restart: unless-stopped
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -44,8 +46,9 @@ services:
     image: ollama/ollama:latest
     profiles: ["cpu"]
     restart: unless-stopped
-    ports:
-      - "11434:11434"
+    # Not published: only `backend` calls it, via OLLAMA_HOST=http://ollama:11434
+    # on the Docker network. An internet-reachable Ollama is free GPU for
+    # whoever finds it.
     environment:
       # Keep the model resident once loaded instead of unloading after the
       # default 5m idle timeout — cold-loading this model takes 2+ minutes,
@@ -84,8 +87,8 @@ services:
     &surya-inference
     build: ./surya-inference
     profiles: ["cpu"]
-    ports:
-      - "8500:8000"
+    # Not published: only `backend` calls it, via
+    # SURYA_INFERENCE_URL=http://surya-inference:8000/v1 on the Docker network.
     environment:
       SURYA_INFERENCE_PARALLEL: ${SURYA_INFERENCE_PARALLEL:-4}
       SURYA_INFERENCE_CTX_SIZE: ${SURYA_INFERENCE_CTX_SIZE:-49152}
@@ -142,12 +145,17 @@ services:
         GPU: "0"
     profiles: ["cpu"]
     restart: unless-stopped
-    # 8000 app, 8001 translation, 8002 field_mapping, 8010 ocr, 8080 gateway.
+    # Five uvicorn processes run in here: 8000 app, 8001 translation, 8002
+    # field_mapping, 8010 ocr, 8080 gateway. Only the gateway is published —
+    # it already reverse-proxies every route the other four define (see
+    # gateway/main.py), and they talk to each other over the container's own
+    # loopback (the APP_/TRANSLATION_/FIELD_MAPPING_/OCR_BASE_URL vars below
+    # are all 127.0.0.1), so nothing internal depends on a host binding.
+    # Publishing the other four would put four unauthenticated services on
+    # 0.0.0.0, bypassing the gateway's CORS and timeout policy. To reach them
+    # directly while developing, use `docker compose exec backend curl
+    # 127.0.0.1:<port>/...` or a local docker-compose.override.yml.
     ports:
-      - "8000:8000"
-      - "8001:8001"
-      - "8002:8002"
-      - "8010:8010"
       - "8080:8080"
     env_file:
       - .env
