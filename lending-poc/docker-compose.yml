@@ -10,12 +10,6 @@
 # GPU device reservation, a different build), rather than duplicating the
 # whole block.
 services:
-  # Plain Postgres. This was pgvector/pgvector:pg16 while golden_records held
-  # an address_embedding vector column; that column was write-only and was
-  # dropped in migration 0010, so no extension is needed any more.
-  # `healthcheck` lets `backend`'s `depends_on: condition: service_healthy`
-  # wait for Postgres to actually accept connections, not just for the
-  # container to start.
   db:
     image: postgres:16
     env_file:
@@ -24,8 +18,6 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-lending_poc}
-    ports:
-      - "${POSTGRES_HOST_PORT:-55439}:5432"
     restart: unless-stopped
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -44,13 +36,7 @@ services:
     image: ollama/ollama:latest
     profiles: ["cpu"]
     restart: unless-stopped
-    ports:
-      - "11434:11434"
     environment:
-      # Keep the model resident once loaded instead of unloading after the
-      # default 5m idle timeout — cold-loading this model takes 2+ minutes,
-      # which otherwise blows past callers' request timeouts on every call
-      # after a short idle gap.
       OLLAMA_KEEP_ALIVE: -1
     volumes:
       - ollama_models:/root/.ollama
@@ -74,18 +60,10 @@ services:
               count: all
               capabilities: [gpu]
 
-  # surya-inference and ocr each come in a "cpu" and "gpu" variant, selected
-  # via COMPOSE_PROFILES in .env (defaults to "cpu" so plain `docker compose
-  # up` always works). Both variants of a pair share a network alias so
-  # downstream services (SURYA_INFERENCE_URL, OCR_BASE_URL) don't need to
-  # know which one is active. See document_processing/ocr/README.md for GPU
-  # prerequisites (NVIDIA Container Toolkit / WSL GPU passthrough).
   surya-inference:
     &surya-inference
     build: ./surya-inference
     profiles: ["cpu"]
-    ports:
-      - "8500:8000"
     environment:
       SURYA_INFERENCE_PARALLEL: ${SURYA_INFERENCE_PARALLEL:-4}
       SURYA_INFERENCE_CTX_SIZE: ${SURYA_INFERENCE_CTX_SIZE:-49152}
@@ -105,10 +83,7 @@ services:
       default:
         aliases:
           - surya-inference
-    # This is the container that actually does GPU-heavy OCR recognition.
-    # backend's Surya client (SURYA_INFERENCE_AUTOSTART=false) never runs a
-    # model locally — it just calls this service over HTTP
-    # (SURYA_INFERENCE_URL), so backend-gpu's own GPU is not involved in OCR.
+    
     deploy:
       resources:
         reservations:
@@ -117,23 +92,6 @@ services:
               count: all
               capabilities: [gpu]
 
-  # app, translation, field-mapping, ocr, and gateway run as five separate
-  # uvicorn processes inside one image (see scripts/start-combined.sh) —
-  # none of their own code changed, this just co-locates them. Internal
-  # *_BASE_URL vars point at 127.0.0.1 since they're now processes in the
-  # same container rather than separate services on the Docker network.
-  # Same cpu/gpu profile split as ollama/surya-inference above: the GPU
-  # build arg controls which torch wheel gets installed for the one remaining
-  # torch-dependent dep in here (surya-ocr).
-  #
-  # NOTE: nothing in this container runs model inference any more.
-  # sentence-transformers (embeddings for /cases) was the only thing that did,
-  # and it was removed along with the address_embedding column. surya-ocr
-  # still pulls in torch, but here it's just a thin HTTP client to the
-  # surya-inference service above, which does the real OCR GPU work. So
-  # backend-gpu's GPU reservation currently buys nothing — the profile is kept
-  # for symmetry with the other services, but it could be collapsed to a
-  # single CPU build.
   backend:
     &backend
     build:
@@ -142,12 +100,7 @@ services:
         GPU: "0"
     profiles: ["cpu"]
     restart: unless-stopped
-    # 8000 app, 8001 translation, 8002 field_mapping, 8010 ocr, 8080 gateway.
     ports:
-      - "8000:8000"
-      - "8001:8001"
-      - "8002:8002"
-      - "8010:8010"
       - "8080:8080"
     env_file:
       - .env
@@ -155,12 +108,6 @@ services:
       DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql+asyncpg://postgres:postgres@db:5432/lending_poc}
       OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e4b-it-qat}
-      # Read-phase circuit breaker for a wedged Ollama, not a per-request SLA.
-      # Must stay above a real cold load (2+ min — firing mid-load makes Ollama
-      # abort it) but not far past the gateway timeout, since past that
-      # the call still holds field-mapping's request lock with nobody waiting.
-      # See the matching comment on request_timeout in field_mapping_poc/config.py.
-      # TEMP(slow-host testing): raised from 600 to 1800. Revert before merging.
       OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-1800}
       SURYA_INFERENCE_URL: http://surya-inference:8000/v1
       SURYA_INFERENCE_AUTOSTART: "false"
@@ -168,11 +115,6 @@ services:
       TRANSLATION_BASE_URL: http://127.0.0.1:8001
       FIELD_MAPPING_BASE_URL: http://127.0.0.1:8002
       OCR_BASE_URL: http://127.0.0.1:8010
-      # Each backend has a model in its path and can legitimately run for
-      # minutes (OCR to Surya, translation/field-mapping to Ollama) — these match
-      # the timeouts the frontend already budgets for the same calls, so the
-      # gateway is never the first link in the chain to give up.
-      # TEMP(slow-host testing): raised from 300 to 1800. Revert before merging.
       OCR_REQUEST_TIMEOUT_SECONDS: ${OCR_REQUEST_TIMEOUT_SECONDS:-1800}
       TRANSLATION_REQUEST_TIMEOUT_SECONDS: ${TRANSLATION_REQUEST_TIMEOUT_SECONDS:-1800}
       FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS: ${FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS:-1800}
@@ -182,8 +124,7 @@ services:
       # OCR (surya-ocr) pulls its models from the HuggingFace hub on first
       # use. Without this the download repeats on every container recreate,
       # which takes minutes and needs network — same reasoning as
-      # ollama_models/surya_models above. (/cases used to pull a
-      # sentence-transformers model here too, until embeddings were removed.)
+      # ollama_models/surya_models above. 
       - hf_cache:/root/.cache/huggingface
     # Only one of ollama/ollama-gpu and one of surya-inference/surya-inference-gpu
     # exists at runtime (profile-gated), so all four are listed here as
@@ -215,8 +156,6 @@ services:
       context: .
       args:
         GPU: "1"
-    # Same alias trick as ollama-gpu: makes backend-gpu answer to the plain
-    # name "backend" so nothing downstream needs to know which is active.
     networks:
       default:
         aliases:
@@ -234,8 +173,6 @@ services:
     ports:
       - "5173:5173"
     environment:
-      # Browser-facing: must be host-reachable (localhost + published port),
-      # not a Docker-internal service name.
       VITE_API_BASE_URL: http://localhost:8080
       VITE_TRANSLATION_API_BASE_URL: http://localhost:8080
     volumes:
