@@ -19,11 +19,12 @@ ENV PATH="/opt/venv/bin:$PATH"
 WORKDIR /app
 
 # CPU by default: pin the CPU-only torch wheel so the image doesn't pull
-# CUDA deps it can't use (sentence-transformers, pulled in via pyproject.toml
-# below, and surya-ocr, pulled in via document_processing/ocr/requirements.txt,
-# both depend on torch). Paired with the "gpu" compose profile, build with
-# --build-arg GPU=1 to skip the pin and let their default CUDA-enabled wheel
-# install instead.
+# CUDA deps it can't use. surya-ocr (via document_processing/ocr/requirements.txt)
+# is now the only torch-dependent package here, and in this container it only
+# acts as an HTTP client to the surya-inference service — so nothing in this
+# image actually runs torch inference. Paired with the "gpu" compose profile,
+# build with --build-arg GPU=1 to skip the pin and let the default
+# CUDA-enabled wheel install instead.
 ARG GPU=0
 RUN if [ "$GPU" = "0" ]; then \
       pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu; \

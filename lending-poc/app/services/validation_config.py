@@ -9,7 +9,6 @@ REQUIRED_DOCUMENT_TYPES = ["AADHAAR", "PAN", "SALARY_SLIP", "BANK_STATEMENT"]
 
 NAME_MATCH_THRESHOLD = 85.0
 EMPLOYER_MATCH_THRESHOLD = 80.0
-ADDRESS_SIMILARITY_THRESHOLD = 0.55  # cosine, 0-1 (stub embeddings are coarser than real ones)
 
 SALARY_CREDIT_EXTRA_MONTHS = 1
 SALARY_CREDIT_BUFFER_DAYS = 5
@@ -26,11 +25,19 @@ TXN_SELECTION_MIN_SCORE = 60.0
 # employers/languages/formats).
 SALARY_AMOUNT_TOLERANCE_PCT = 3.0
 
+# Only check types that can actually fail carry weight. ADDRESS, AADHAAR
+# and PAN are resolved onto the Golden Record but not cross-checked, since
+# each is copied from the very document it would be compared against (see
+# identity_validation's module docstring). They are still emitted by
+# check_mandatory_presence, which drives the hard-FAIL path -- they simply
+# score nothing, and compute_score ignores any check type absent from this
+# table.
+#
+# These weights are not normalized to 1.0 and don't need to be: compute_score
+# divides by the total weight of the check types actually observed, so the
+# numbers below are read as ratios to each other, not as percentages.
 VALIDATION_WEIGHTS = {
     "NAME": 0.15,
-    "ADDRESS": 0.10,
-    "AADHAAR": 0.15,
-    "PAN": 0.15,
     "DOB": 0.10,
     "EMPLOYER": 0.10,
     "SALARY_CREDIT_COUNT": 0.25,
