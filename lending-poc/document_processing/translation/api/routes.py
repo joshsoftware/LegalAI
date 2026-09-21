@@ -61,6 +61,39 @@ STATUS_DETAIL = {
     "ok": "Model is loaded and responding.",
 }
 
+# Retry-After hint sent with the 503 when Ollama is known-down. Deliberately
+# not OLLAMA_HEALTH_RETRY_SECONDS (5s) — that's how fast our own monitor
+# re-probes, but telling clients to retry that fast just hammers a service
+# that is genuinely down.
+UNAVAILABLE_RETRY_AFTER_SECONDS = 30
+
+
+def _reject_if_ollama_down(request: Request) -> None:
+    """
+    Fail fast when Ollama is known-down, before queueing on _translate_lock —
+    otherwise concurrent callers pile up serially behind a doomed request.
+
+    Deliberately `== "unreachable"`, NOT `!= "ok"`: "initializing" means the
+    server is up but the model hasn't answered yet — i.e. a cold load is in
+    progress — and those requests DO succeed if allowed to wait (~3min).
+    Rejecting them would turn working-but-slow into a hard failure.
+
+    Reads the default domain's service for the same reason /health does: all
+    domains share one model, and api_server.py only starts the monitor on that
+    one, so the other domains' status never leaves its initial value.
+
+    This is a fast path, not a guarantee: status can be up to
+    OLLAMA_HEALTH_RECHECK_SECONDS stale, and Ollama can wedge mid-call, so the
+    adapter's own timeouts still have to stand on their own.
+    """
+    default_service = request.app.state.services[DEFAULT_DOMAIN]
+    if default_service.health_status() == "unreachable":
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=STATUS_DETAIL["unreachable"],
+            headers={"Retry-After": str(UNAVAILABLE_RETRY_AFTER_SECONDS)},
+        )
+
 
 @router.get(
     "/health",
@@ -116,6 +149,9 @@ async def translate_text(body: TextTranslateRequest, request: Request):
     ```
     """
     service = _get_service(request, body.domain)
+    # After _get_service so an unknown domain still gets its more specific,
+    # permanent 400 regardless of Ollama's state.
+    _reject_if_ollama_down(request)
     try:
         matches = retrieve(body.text, service._kb)
         async with _translate_lock:
@@ -174,6 +210,13 @@ async def translate_files(
         )
 
     service = _get_service(request, domain)
+    # Same fail-fast as /translate/text. Matters more here: without it every
+    # file in the batch would be attempted and fail in turn, so an N-file
+    # upload spends N doomed round-trips holding the lock. This rejects the
+    # whole request only when Ollama is down — per-file failures still come
+    # back inline, as documented above.
+    _reject_if_ollama_down(request)
+
     results = []
     succeeded = 0
     failed = 0
