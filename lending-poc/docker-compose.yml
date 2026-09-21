@@ -152,10 +152,11 @@ services:
       OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e4b-it-qat}
       # Read-phase circuit breaker for a wedged Ollama, not a per-request SLA.
       # Must stay above a real cold load (2+ min — firing mid-load makes Ollama
-      # abort it) but not far past the 300s gateway timeout, since past that
+      # abort it) but not far past the gateway timeout, since past that
       # the call still holds field-mapping's request lock with nobody waiting.
       # See the matching comment on request_timeout in field_mapping_poc/config.py.
-      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-600}
+      # TEMP(slow-host testing): raised from 600 to 1800. Revert before merging.
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-1800}
       SURYA_INFERENCE_URL: http://surya-inference:8000/v1
       SURYA_INFERENCE_AUTOSTART: "false"
       APP_BASE_URL: http://127.0.0.1:8000
@@ -167,10 +168,11 @@ services:
       # loading a sentence-transformers model on first call) — these match
       # the timeouts the frontend already budgets for the same calls, so the
       # gateway is never the first link in the chain to give up.
-      OCR_REQUEST_TIMEOUT_SECONDS: ${OCR_REQUEST_TIMEOUT_SECONDS:-300}
-      TRANSLATION_REQUEST_TIMEOUT_SECONDS: ${TRANSLATION_REQUEST_TIMEOUT_SECONDS:-300}
-      FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS: ${FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS:-300}
-      APP_REQUEST_TIMEOUT_SECONDS: ${APP_REQUEST_TIMEOUT_SECONDS:-300}
+      # TEMP(slow-host testing): raised from 300 to 1800. Revert before merging.
+      OCR_REQUEST_TIMEOUT_SECONDS: ${OCR_REQUEST_TIMEOUT_SECONDS:-1800}
+      TRANSLATION_REQUEST_TIMEOUT_SECONDS: ${TRANSLATION_REQUEST_TIMEOUT_SECONDS:-1800}
+      FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS: ${FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS:-1800}
+      APP_REQUEST_TIMEOUT_SECONDS: ${APP_REQUEST_TIMEOUT_SECONDS:-1800}
     volumes:
       - .:/app
       # Both /cases (sentence-transformers) and OCR (surya-ocr) pull their
