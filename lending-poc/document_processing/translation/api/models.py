@@ -11,6 +11,8 @@ from translation_service.config import SUPPORTED_DOMAINS, DEFAULT_DOMAIN
 # in config.py automatically updates the API validation too.
 DomainLiteral = Literal["legal", "banking"]
 
+HealthStatus = Literal["ok", "initializing", "unreachable"]
+
 
 # ---------------------------------------------------------------------------
 # Request models
@@ -62,7 +64,14 @@ class FilesTranslateResponse(BaseModel):
 class HealthResponse(BaseModel):
     """Response for GET /health."""
 
-    status: str = Field(description="'ok' if the model is reachable, 'degraded' otherwise.")
+    status: HealthStatus = Field(
+        description=(
+            "'unreachable' if Ollama isn't responding, 'initializing' if it's "
+            "reachable but the model hasn't responded yet (e.g. cold-loading), "
+            "'ok' if the model is loaded and responding."
+        )
+    )
+    detail: str = Field(description="Human-readable explanation of `status`.")
     model: str = Field(description="Model name currently configured.")
     adapter: str = Field(description="Adapter/backend currently configured.")
     domains: list[str] = Field(description="Supported translation domains.")

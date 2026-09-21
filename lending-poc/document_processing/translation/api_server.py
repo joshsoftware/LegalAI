@@ -16,7 +16,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from translation_service import TranslationService
-from translation_service.config import SUPPORTED_DOMAINS, MODEL_NAME, MODEL_ADAPTER, MODEL_OPTIONS
+from translation_service.config import (
+    SUPPORTED_DOMAINS,
+    DEFAULT_DOMAIN,
+    MODEL_NAME,
+    MODEL_ADAPTER,
+    MODEL_OPTIONS,
+)
 from api.routes import router
 
 
@@ -33,9 +39,14 @@ async def lifespan(app: FastAPI):
             model_options=MODEL_OPTIONS,
         )
 
+    # Only the default domain's service is monitored — /health checks it alone
+    # since all domains share one underlying model (see api/routes.py).
+    await app.state.services[DEFAULT_DOMAIN].start_health_monitor()
+
     print(f"[startup] Ready — model={MODEL_NAME}, adapter={MODEL_ADAPTER}, "
           f"domains={SUPPORTED_DOMAINS}")
     yield
+    await app.state.services[DEFAULT_DOMAIN].stop_health_monitor()
     print("[shutdown] Translation service stopped.")
 
 
