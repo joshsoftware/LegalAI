@@ -70,4 +70,4 @@ RUN chmod +x scripts/start-combined.sh
 
 EXPOSE 8000 8001 8002 8010 8080
 
-CMD ["scripts/start-combined.sh"]
+CMD ["bash", "scripts/start-combined.sh"]
