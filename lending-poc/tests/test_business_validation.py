@@ -22,16 +22,47 @@ SALARY = 50000.0
 
 
 def _slip(doc_id, month, salary=SALARY, employer=EMPLOYER):
+    """Build a salary slip for a test case.
+
+    Args:
+        doc_id (str): Identifier the slip's validation results are keyed by.
+        month (date or None): First-of-month salary month, or None for an
+            undated slip.
+        salary (float): Declared net salary. Defaults to SALARY.
+        employer (str): Employer name on the slip. Defaults to EMPLOYER.
+
+    Returns:
+        SalarySlipDoc: The constructed slip.
+    """
     return SalarySlipDoc(
         doc_id=doc_id, employer_name=employer, net_salary=salary, salary_month=month
     )
 
 
 def _txn(day, amount=SALARY, narration="NEFT ACME CORP SALARY"):
+    """Build a bank transaction that looks like a salary credit by default.
+
+    Args:
+        day (date): Transaction date.
+        amount (float): Credited amount. Defaults to SALARY.
+        narration (str): Bank narration text, matched against the employer.
+
+    Returns:
+        BankTransaction: The constructed transaction.
+    """
     return BankTransaction(narration=narration, amount=amount, txn_date=day)
 
 
 def _case(slips, transactions):
+    """Build a case holding only salary slips and a bank statement.
+
+    Args:
+        slips (list[SalarySlipDoc]): The case's salary slips.
+        transactions (list[BankTransaction]): The bank statement's transactions.
+
+    Returns:
+        CaseInput: The constructed case.
+    """
     return CaseInput(
         applicant_ref="APP-TEST-0001",
         salary_slips=slips,
@@ -40,20 +71,57 @@ def _case(slips, transactions):
 
 
 def _missing(results):
+    """Select the missing-slip results.
+
+    Args:
+        results (list[ValidationResult]): Output of run_business_validation.
+
+    Returns:
+        list[ValidationResult]: Only the SALARY_CONTINUITY results.
+    """
     return [r for r in results if r.check_type == CheckType.SALARY_CONTINUITY]
 
 
 def _missing_months(results):
+    """Collect the months reported as having no salary slip.
+
+    Args:
+        results (list[ValidationResult]): Output of run_business_validation.
+
+    Returns:
+        set[date]: First-of-month dates from each missing-slip result.
+    """
     return {r.evidence["month"] for r in _missing(results)}
 
 
 def _salary_date(results, doc_id):
+    """Find the SALARY_DATE result for one slip.
+
+    Args:
+        results (list[ValidationResult]): Output of run_business_validation.
+        doc_id (str): The slip whose result to find.
+
+    Returns:
+        ValidationResult: That slip's SALARY_DATE result.
+
+    Raises:
+        StopIteration: If no SALARY_DATE result exists for doc_id.
+    """
     return next(
         r for r in results if r.check_type == CheckType.SALARY_DATE and r.document_id == doc_id
     )
 
 
 def _matched_transactions(results):
+    """Collect every bank transaction some slip claimed as its salary credit.
+
+    Args:
+        results (list[ValidationResult]): Output of run_business_validation.
+
+    Returns:
+        list[BankTransaction]: One entry per claim, so a transaction claimed
+            twice would appear twice.
+    """
     return [
         r.evidence["matched_transaction"]
         for r in results
@@ -132,6 +200,7 @@ def test_each_credit_can_be_claimed_by_only_one_slip():
 
 
 def test_no_results_when_every_statement_month_has_a_slip():
+    """A Mar-Jun statement with a slip for every month reports nothing missing."""
     slips = [
         _slip("SLIP-MAR", date(2026, 3, 1)),
         _slip("SLIP-APR", date(2026, 4, 1)),
