@@ -46,29 +46,16 @@ async def lifespan(app: FastAPI):
 
     async def monitor_readiness() -> None:
         """Run Surya's one-time startup check, then keep polling its liveness.
-
-        The initial warm-up and the recurring probe both drive the same
-        ocr_ready/ocr_error flags, so they run one after another in a single
-        task rather than as two tasks racing to write that state - otherwise
-        an early probe result could mark the API ready before warm-up has
-        actually validated Surya's inference backend.
         """
         try:
             await run_in_threadpool(extractor.engine.warm_up)
         except Exception as exc:
-            # Keep the API available for diagnostics.  /extract will return a
-            # useful 503 instead of holding an upload open while Surya retries
-            # a missing/misconfigured WSL inference runtime.
+            
             app.state.ocr_error = str(exc)
         else:
             app.state.ocr_ready = True
 
-        # Surya's own inference backend (llama-server) exposes a lightweight
-        # /health endpoint that answers instantly without running the model,
-        # so polling it here can't collide with the segfault-on-concurrency
-        # issue _extract_lock guards against. Each check stands on its own -
-        # the most recent result is what ocr_ready/ocr_error reflect, with no
-        # retry/backoff smoothing.
+        
         while True:
             await asyncio.sleep(LIVENESS_PROBE_INTERVAL_SECONDS)
             try:
@@ -104,8 +91,7 @@ app = FastAPI(
 # File size limit (50MB)
 MAX_FILE_SIZE = 50 * 1024 * 1024
 
-# The Surya engine crashes (segfault) if invoked from more than one thread at
-# once, so concurrent /extract calls must queue rather than run in parallel.
+
 _extract_lock = asyncio.Lock()
 
 @app.get("/health")
@@ -174,9 +160,6 @@ async def extract_text(file: UploadFile = File(...)) -> Dict[str, Any]:
             temp_file.write(content)
             temp_file_path = temp_file.name
         
-        # Runs in a worker thread (so this blocking call doesn't freeze the
-        # event loop for other requests) but serialized via a lock (so two
-        # extractions never actually run at the same time, which segfaults).
         async with _extract_lock:
             result = await run_in_threadpool(extractor.process_document, temp_file_path)
         
