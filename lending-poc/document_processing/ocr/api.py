@@ -30,10 +30,6 @@ from extractor.loader import SUPPORTED_EXTENSIONS
 # Initialize extractor (reused across requests for efficiency)
 extractor = Extractor(engine=DEFAULT_ENGINE)
 
-# Base URL for the liveness probe in monitor_readiness() below - derived from
-# SURYA_INFERENCE_URL since that already points at the right host/port.
-_SURYA_INFERENCE_URL = os.getenv("SURYA_INFERENCE_URL", "http://surya-inference:8000/v1")
-SURYA_HEALTH_URL = _SURYA_INFERENCE_URL.removesuffix("/v1") + "/health"
 LIVENESS_PROBE_INTERVAL_SECONDS = float(os.getenv("SURYA_LIVENESS_PROBE_INTERVAL_SECONDS", "10"))
 LIVENESS_PROBE_TIMEOUT_SECONDS = float(os.getenv("SURYA_LIVENESS_PROBE_TIMEOUT_SECONDS", "5"))
 
@@ -47,27 +43,47 @@ async def lifespan(app: FastAPI):
     async def monitor_readiness() -> None:
         """Run Surya's one-time startup check, then keep polling its liveness.
         """
+        warmed_up = False
         try:
             await run_in_threadpool(extractor.engine.warm_up)
         except Exception as exc:
-            
+
             app.state.ocr_error = str(exc)
         else:
+            warmed_up = True
             app.state.ocr_ready = True
 
-        
+        # Only an externally hosted Surya exposes a health endpoint; otherwise
+        # it runs in-process and the warm-up result above is all we can check.
+        health_url = extractor.engine.health_url
+        if health_url is None:
+            return
+
         while True:
             await asyncio.sleep(LIVENESS_PROBE_INTERVAL_SECONDS)
             try:
                 async with httpx.AsyncClient(timeout=LIVENESS_PROBE_TIMEOUT_SECONDS) as client:
-                    response = await client.get(SURYA_HEALTH_URL)
+                    response = await client.get(health_url)
                     response.raise_for_status()
             except Exception as exc:
                 app.state.ocr_ready = False
                 app.state.ocr_error = str(exc)
-            else:
-                app.state.ocr_ready = True
-                app.state.ocr_error = None
+                continue
+
+            # A reachable server is not enough - the local Surya client must
+            # have initialized too, or /extract would accept work it cannot do.
+            # Retry here so a server that came up late recovers without a restart.
+            if not warmed_up:
+                try:
+                    await run_in_threadpool(extractor.engine.warm_up)
+                except Exception as exc:
+                    app.state.ocr_ready = False
+                    app.state.ocr_error = str(exc)
+                    continue
+                warmed_up = True
+
+            app.state.ocr_ready = True
+            app.state.ocr_error = None
 
     monitor_task = asyncio.create_task(monitor_readiness())
     try:
