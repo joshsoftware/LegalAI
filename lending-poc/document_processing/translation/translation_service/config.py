@@ -17,7 +17,13 @@ from pathlib import Path
 
 # Directory containing .txt files produced by the OCR engine.
 # OCR service writes here → translation service reads from here.
-INPUT_DIR = Path(os.getenv("TRANSLATION_INPUT_DIR", "./extraction_output/text"))
+# Anchored to this file's location so the default doesn't depend on the CWD.
+# parents[2] = document_processing/ (config.py → translation_service → translation → document_processing)
+_DOC_PROCESSING_DIR = Path(__file__).resolve().parents[2]
+INPUT_DIR = Path(os.getenv(
+    "TRANSLATION_INPUT_DIR",
+    str(_DOC_PROCESSING_DIR / "ocr" / "extraction_output" / "text"),
+))
 
 # Directory where translated .txt files are written (created automatically).
 OUTPUT_DIR = Path("./output")
