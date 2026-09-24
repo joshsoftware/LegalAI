@@ -2,13 +2,8 @@
 # combined backend (app/translation/field_mapping/ocr/gateway), and the
 # frontend.
 #
-# Most backend-facing services come in "cpu"/"gpu" pairs (e.g. ollama /
-# ollama-gpu), selected at `docker compose up` time via COMPOSE_PROFILES in
-# .env (defaults to "cpu" so a plain `docker compose up` always works with
-# no GPU setup). Each gpu variant is written with YAML's `<<: *name` merge
-# key to copy its cpu sibling's config and override only what differs (a
-# GPU device reservation, a different build), rather than duplicating the
-# whole block.
+# Backend services that need GPU (ollama, surya-inference) come in "cpu"/"gpu"
+# pairs, selected via COMPOSE_PROFILES in .env (defaults to "cpu").
 services:
   db:
     image: postgres:16
@@ -27,10 +22,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # Ollama's own image already auto-detects CUDA at runtime and falls back
-  # to CPU on its own — no custom build needed here, just the same cpu/gpu
-  # profile split used for surya-inference/ocr below, so GPU access is only
-  # requested when COMPOSE_PROFILES=gpu.
   ollama:
     &ollama
     image: ollama/ollama:latest
@@ -44,10 +35,6 @@ services:
   ollama-gpu:
     <<: *ollama
     profiles: ["gpu"]
-    # Only one of ollama/ollama-gpu is ever running (profile-gated), so this
-    # alias makes ollama-gpu also answer to the plain name "ollama" on the
-    # Docker network — backend's OLLAMA_HOST doesn't need to know which
-    # variant is active.
     networks:
       default:
         aliases:
@@ -62,7 +49,10 @@ services:
 
   surya-inference:
     &surya-inference
-    build: ./surya-inference
+    build:
+      context: ./surya-inference
+      args:
+        LLAMA_IMAGE: ghcr.io/ggml-org/llama.cpp:server
     profiles: ["cpu"]
     environment:
       SURYA_INFERENCE_PARALLEL: ${SURYA_INFERENCE_PARALLEL:-4}
@@ -76,14 +66,11 @@ services:
     build:
       context: ./surya-inference
       args:
-        BASE_IMAGE: nvidia/cuda:12.4.1-devel-ubuntu22.04
-        RUNTIME_IMAGE: nvidia/cuda:12.4.1-runtime-ubuntu22.04
-        GGML_CUDA: "ON"
+        LLAMA_IMAGE: ghcr.io/ggml-org/llama.cpp:server-cuda
     networks:
       default:
         aliases:
           - surya-inference
-    
     deploy:
       resources:
         reservations:
@@ -93,12 +80,10 @@ services:
               capabilities: [gpu]
 
   backend:
-    &backend
     build:
       context: .
       args:
         GPU: "0"
-    profiles: ["cpu"]
     restart: unless-stopped
     ports:
       - "8080:8080"
@@ -121,18 +106,7 @@ services:
       APP_REQUEST_TIMEOUT_SECONDS: ${APP_REQUEST_TIMEOUT_SECONDS:-1800}
     volumes:
       - .:/app
-      # OCR (surya-ocr) pulls its models from the HuggingFace hub on first
-      # use. Without this the download repeats on every container recreate,
-      # which takes minutes and needs network — same reasoning as
-      # ollama_models/surya_models above. 
       - hf_cache:/root/.cache/huggingface
-    # Only one of ollama/ollama-gpu and one of surya-inference/surya-inference-gpu
-    # exists at runtime (profile-gated), so all four are listed here as
-    # required: false — backend can't hard-depend on whichever specific one
-    # isn't active for the current profile. Without required: false (the
-    # default), Compose would refuse to start backend at all: it would wait
-    # on a service that was never created because it belongs to the profile
-    # you're not running (e.g. waiting on ollama-gpu while running COMPOSE_PROFILES=cpu).
     depends_on:
       db:
         condition: service_healthy
@@ -148,25 +122,6 @@ services:
       surya-inference-gpu:
         condition: service_started
         required: false
-
-  backend-gpu:
-    <<: *backend
-    profiles: ["gpu"]
-    build:
-      context: .
-      args:
-        GPU: "1"
-    networks:
-      default:
-        aliases:
-          - backend
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
 
   frontend:
     build: ./frontend
@@ -186,3 +141,4 @@ volumes:
   ollama_models:
   surya_models:
   hf_cache:
+

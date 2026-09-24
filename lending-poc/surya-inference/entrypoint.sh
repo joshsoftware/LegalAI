@@ -11,14 +11,17 @@ mkdir -p "$MODEL_DIR"
 MODEL_PATH="${MODEL_DIR}/${SURYA_GGUF_MODEL_FILE}"
 MMPROJ_PATH="${MODEL_DIR}/${SURYA_GGUF_MMPROJ_FILE}"
 
-if [ ! -f "$MODEL_PATH" ]; then
+# Ensure files exist and are not corrupt/empty (must be > 10MB)
+if [ ! -f "$MODEL_PATH" ] || [ $(wc -c < "$MODEL_PATH" 2>/dev/null || echo 0) -lt 10000000 ]; then
+  rm -f "$MODEL_PATH"
   echo "Downloading ${SURYA_GGUF_MODEL_FILE} from ${SURYA_GGUF_REPO}..."
-  curl -fL -o "$MODEL_PATH" "https://huggingface.co/${SURYA_GGUF_REPO}/resolve/main/${SURYA_GGUF_MODEL_FILE}"
+  curl -fL -H "User-Agent: Mozilla/5.0" -o "$MODEL_PATH" "https://huggingface.co/${SURYA_GGUF_REPO}/resolve/main/${SURYA_GGUF_MODEL_FILE}"
 fi
 
-if [ ! -f "$MMPROJ_PATH" ]; then
+if [ ! -f "$MMPROJ_PATH" ] || [ $(wc -c < "$MMPROJ_PATH" 2>/dev/null || echo 0) -lt 10000000 ]; then
+  rm -f "$MMPROJ_PATH"
   echo "Downloading ${SURYA_GGUF_MMPROJ_FILE} from ${SURYA_GGUF_REPO}..."
-  curl -fL -o "$MMPROJ_PATH" "https://huggingface.co/${SURYA_GGUF_REPO}/resolve/main/${SURYA_GGUF_MMPROJ_FILE}"
+  curl -fL -H "User-Agent: Mozilla/5.0" -o "$MMPROJ_PATH" "https://huggingface.co/${SURYA_GGUF_REPO}/resolve/main/${SURYA_GGUF_MMPROJ_FILE}"
 fi
 
 # nvidia-smi only shows up here if the container was actually started with
