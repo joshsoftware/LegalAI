@@ -19,6 +19,7 @@ from typing import Any, Dict
 import os
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.concurrency import run_in_threadpool
 import uvicorn
@@ -29,6 +30,9 @@ from extractor.loader import SUPPORTED_EXTENSIONS
 # Initialize extractor (reused across requests for efficiency)
 extractor = Extractor(engine=DEFAULT_ENGINE)
 
+LIVENESS_PROBE_INTERVAL_SECONDS = float(os.getenv("SURYA_LIVENESS_PROBE_INTERVAL_SECONDS", "10"))
+LIVENESS_PROBE_TIMEOUT_SECONDS = float(os.getenv("SURYA_LIVENESS_PROBE_TIMEOUT_SECONDS", "5"))
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -36,24 +40,58 @@ async def lifespan(app: FastAPI):
     app.state.ocr_ready = False
     app.state.ocr_error = None
 
-    async def warm_up() -> None:
+    async def monitor_readiness() -> None:
+        """Run Surya's one-time startup check, then keep polling its liveness.
+        """
+        warmed_up = False
         try:
             await run_in_threadpool(extractor.engine.warm_up)
         except Exception as exc:
-            # Keep the API available for diagnostics.  /extract will return a
-            # useful 503 instead of holding an upload open while Surya retries
-            # a missing/misconfigured WSL inference runtime.
+
             app.state.ocr_error = str(exc)
         else:
+            warmed_up = True
             app.state.ocr_ready = True
 
-    warm_up_task = asyncio.create_task(warm_up())
+        # Only an externally hosted Surya exposes a health endpoint; otherwise
+        # it runs in-process and the warm-up result above is all we can check.
+        health_url = extractor.engine.health_url
+        if health_url is None:
+            return
+
+        while True:
+            await asyncio.sleep(LIVENESS_PROBE_INTERVAL_SECONDS)
+            try:
+                async with httpx.AsyncClient(timeout=LIVENESS_PROBE_TIMEOUT_SECONDS) as client:
+                    response = await client.get(health_url)
+                    response.raise_for_status()
+            except Exception as exc:
+                app.state.ocr_ready = False
+                app.state.ocr_error = str(exc)
+                continue
+
+            # A reachable server is not enough - the local Surya client must
+            # have initialized too, or /extract would accept work it cannot do.
+            # Retry here so a server that came up late recovers without a restart.
+            if not warmed_up:
+                try:
+                    await run_in_threadpool(extractor.engine.warm_up)
+                except Exception as exc:
+                    app.state.ocr_ready = False
+                    app.state.ocr_error = str(exc)
+                    continue
+                warmed_up = True
+
+            app.state.ocr_ready = True
+            app.state.ocr_error = None
+
+    monitor_task = asyncio.create_task(monitor_readiness())
     try:
         yield
     finally:
-        warm_up_task.cancel()
+        monitor_task.cancel()
         try:
-            await warm_up_task
+            await monitor_task
         except asyncio.CancelledError:
             pass
 
@@ -69,8 +107,7 @@ app = FastAPI(
 # File size limit (50MB)
 MAX_FILE_SIZE = 50 * 1024 * 1024
 
-# The Surya engine crashes (segfault) if invoked from more than one thread at
-# once, so concurrent /extract calls must queue rather than run in parallel.
+
 _extract_lock = asyncio.Lock()
 
 @app.get("/health")
@@ -139,9 +176,6 @@ async def extract_text(file: UploadFile = File(...)) -> Dict[str, Any]:
             temp_file.write(content)
             temp_file_path = temp_file.name
         
-        # Runs in a worker thread (so this blocking call doesn't freeze the
-        # event loop for other requests) but serialized via a lock (so two
-        # extractions never actually run at the same time, which segfaults).
         async with _extract_lock:
             result = await run_in_threadpool(extractor.process_document, temp_file_path)
         
