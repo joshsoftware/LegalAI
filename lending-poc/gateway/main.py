@@ -134,6 +134,49 @@ async def create_case(request: Request) -> Response:
 # per-service request timeouts above, matching the aggregate /health below.
 HEALTH_PROXY_TIMEOUT_SECONDS = float(os.environ.get("HEALTH_PROXY_TIMEOUT_SECONDS", "5"))
 
+_HEALTHY_UPSTREAM_STATUSES = frozenset({"healthy", "ok"})
+_KNOWN_UNHEALTHY_UPSTREAM_STATUSES = frozenset(
+    {"unhealthy", "unreachable", "initializing", "degraded"}
+)
+
+
+def _status_from_upstream(resp: httpx.Response) -> str:
+    if resp.status_code >= 500:
+        try:
+            body_status = resp.json().get("status")
+        except ValueError:
+            body_status = None
+        if isinstance(body_status, str) and body_status:
+            if body_status in _HEALTHY_UPSTREAM_STATUSES:
+                return f"unhealthy ({resp.status_code})"
+            return body_status
+        return f"unhealthy ({resp.status_code})"
+
+    if resp.status_code >= 400:
+        return f"unhealthy ({resp.status_code})"
+
+    try:
+        body_status = resp.json().get("status")
+    except ValueError:
+        body_status = None
+
+    if not isinstance(body_status, str) or not body_status:
+        return "unhealthy"
+
+    if body_status in _HEALTHY_UPSTREAM_STATUSES:
+        return "healthy"
+    if body_status in _KNOWN_UNHEALTHY_UPSTREAM_STATUSES:
+        return body_status
+    return body_status
+
+
+async def _probe_service(client: httpx.AsyncClient, base_url: str) -> str:
+    try:
+        resp = await client.get(f"{base_url}/health", timeout=HEALTH_PROXY_TIMEOUT_SECONDS)
+    except httpx.RequestError:
+        return "unreachable"
+    return _status_from_upstream(resp)
+
 
 @app.get("/ocr/health")
 async def ocr_health(request: Request) -> Response:
@@ -165,11 +208,7 @@ async def health(request: Request) -> dict:
         ("field_mapping", FIELD_MAPPING_BASE_URL),
         ("app", APP_BASE_URL),
     ):
-        try:
-            resp = await client.get(f"{base}/health", timeout=HEALTH_PROXY_TIMEOUT_SECONDS)
-            statuses[name] = "healthy" if resp.status_code == 200 else f"unhealthy ({resp.status_code})"
-        except httpx.RequestError:
-            statuses[name] = "unreachable"
+        statuses[name] = await _probe_service(client, base)
 
     overall = "healthy" if all(v == "healthy" for v in statuses.values()) else "degraded"
     return {"status": overall, "services": statuses}

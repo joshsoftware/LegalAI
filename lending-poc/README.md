@@ -83,22 +83,39 @@ the command above.)
 
 ## 5. Verify it's running
 
+Only two ports are published to the host:
+
 | Service | URL | Notes |
 |---|---|---|
 | Frontend | http://localhost:5173 | Main UI |
-| Gateway | http://localhost:8080 | Single public entrypoint — fronts app/OCR/translation/field-mapping |
-| App (cases API) | http://localhost:8000 | Docs at `/docs`; also reachable via gateway at `/cases`, `/app/health` |
-| Postgres | localhost:55439 | plain `postgres:16` |
-| OCR | http://localhost:8010 | Also reachable via gateway at `/extract`, `/ocr/health` |
-| Translation | http://localhost:8001 | Also reachable via gateway at `/translate/*`, `/translation/health` |
-| Field mapping | http://localhost:8002 | Also reachable via gateway at `/map`, `/field-mapping/health` |
-| Surya inference | http://localhost:8500 | OCR's inference backend |
+| Gateway | http://localhost:8080 | Single public entrypoint — fronts app/OCR/translation/field-mapping. `GET /health` aggregates all four. |
 
-`app`, `ocr`, `translation`, `field_mapping`, and `gateway` all run inside
-the single `backend` container (see below) — the four backend ports above
-are published straight from that container for direct debugging, but the
-frontend and any external caller should go through the gateway on `:8080`,
-which proxies to all four and exposes one aggregate `/health`.
+Everything else — `app` (8000), `translation` (8001), `field_mapping` (8002),
+`ocr` (8010), Postgres (5432), Ollama (11434) and Surya inference (8000) — is
+reachable only on the Docker network or on the `backend` container's own
+loopback, not from the host. The gateway proxies every route the four backend
+services define, so the frontend and any external caller has a complete path
+through `:8080`.
+
+To reach a service directly while debugging, go through the container rather
+than re-publishing the port:
+
+```bash
+docker compose exec backend curl http://127.0.0.1:8010/health   # ocr
+docker compose exec backend curl http://127.0.0.1:8001/health   # translation
+docker compose exec db psql -U postgres lending_poc
+```
+
+If you want the ports back on the host for a local session, add a
+`docker-compose.override.yml` (Compose merges it automatically, and `ports:`
+entries are additive). Keep it out of the deployed environment — a published
+port binds `0.0.0.0`, and Docker's iptables rules sit in front of the host
+firewall, so these unauthenticated services would be internet-reachable.
+Note that YAML anchors don't cross files, so an override needs its own
+`backend-gpu:` block if you use the GPU profile.
+
+`app`, `ocr`, `translation`, `field_mapping`, and `gateway` all run inside the
+single `backend` container (see below).
 
 ### Inside the backend container
 
