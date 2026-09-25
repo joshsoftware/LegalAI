@@ -204,8 +204,6 @@ make status            # Show project status
   `llama-server` is on `PATH`; on an NVIDIA WSL setup configure Surya's vLLM
   backend and Docker/GPU passthrough. The API now verifies this at startup,
   before reporting `/health` as healthy.
-<<<<<<< HEAD
-=======
 
 ### Running via Docker Compose (GPU or CPU)
 
@@ -224,7 +222,6 @@ backend) in a CPU or GPU variant, picked by `COMPOSE_PROFILES` in `.env`:
 
 Switch profiles by editing `COMPOSE_PROFILES` in `lending-poc/.env`, then
 `docker compose up --build`.
->>>>>>> b123ae5bd3b28c3967f2bab28ee35a404ca093b5
 
 ### Dependencies
 

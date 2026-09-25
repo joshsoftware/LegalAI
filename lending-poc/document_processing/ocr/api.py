@@ -48,10 +48,6 @@ async def lifespan(app: FastAPI):
             app.state.ocr_ready = True
 
     warm_up_task = asyncio.create_task(warm_up())
-<<<<<<< HEAD
-    yield
-    warm_up_task.cancel()
-=======
     try:
         yield
     finally:
@@ -60,7 +56,6 @@ async def lifespan(app: FastAPI):
             await warm_up_task
         except asyncio.CancelledError:
             pass
->>>>>>> b123ae5bd3b28c3967f2bab28ee35a404ca093b5
 
 
 # Initialize FastAPI app

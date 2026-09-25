@@ -69,8 +69,6 @@ MODEL_ADAPTER = "ollama"
 
 # Model identifier passed to the chosen adapter.
 MODEL_NAME = os.getenv("OLLAMA_MODEL", "gemma4:e4b-it-qat")
-<<<<<<< HEAD
-=======
 
 # Background /health monitor timing (see OllamaAdapter._monitor_loop). The
 # monitor probes Ollama on a background task — never inline in a request — so
@@ -106,7 +104,6 @@ OLLAMA_HEALTH_BACKOFF_SECONDS = float(os.getenv("OLLAMA_HEALTH_BACKOFF_SECONDS",
 # Reconfirmation interval once status is "ok", so a later Ollama outage is
 # eventually reflected again instead of leaving /health stuck on stale "ok".
 OLLAMA_HEALTH_RECHECK_SECONDS = float(os.getenv("OLLAMA_HEALTH_RECHECK_SECONDS", "30"))
->>>>>>> b123ae5bd3b28c3967f2bab28ee35a404ca093b5
 
 # ---------------------------------------------------------------------------
 # Model options  (adapter-specific — passed through as-is)
