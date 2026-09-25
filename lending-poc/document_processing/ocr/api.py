@@ -66,7 +66,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# File size limit (default 50MB)
+# File size limit
 MAX_FILE_SIZE = int(os.getenv("MAX_UPLOAD_FILE_SIZE_MB", "50")) * 1024 * 1024
 
 # The Surya engine crashes (segfault) if invoked from more than one thread at
