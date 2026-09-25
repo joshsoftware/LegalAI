@@ -95,7 +95,7 @@ An aggregate check: `matched_slips / total_slips × 100`. It passes only if *eve
 
 Reports every calendar month the bank statement covers for which **no salary slip was submitted**. A month counts as covered by a slip's own `salary_month` — deliberately *not* by its §4.1 search window, which is wide only to tolerate late payroll and would otherwise let a March slip vouch for April, a month it says nothing about.
 
-This check makes no inference about income: it does not look for a credit in the uncovered month, and does not borrow a neighbouring slip's declared salary or employer as the expected value. It reads no transactions at all, which means it can never claim a bank credit — §4.1 remains the only thing that consumes one.
+This check makes no inference about income: it does not look for a credit in the uncovered month, and does not borrow a neighbouring slip's declared salary or employer as the expected value. It reads only the transaction **dates** of the bank statement, to work out which months the statement covers. It never inspects amounts or narrations, so it can never claim a bank credit — §4.1 remains the only thing that consumes one.
 
 A **trailing partial month is excluded**. If the statement's last transaction falls before that month ends, the month is still in progress and its slip cannot have been issued yet, so reporting it would penalise an otherwise complete submission. A partial *leading* month is still required. The statement period is inferred from transaction dates (`BankStatementDoc` carries no declared period, the same inference §4.3 makes for `stmt_duration`), so a statement with no activity in its final days reads as partial — the inference errs toward reporting nothing.
 
