@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore, type DocType, type UploadedDocument } from '@/store/useAppStore'
-import { DOCUMENT_TYPE_CONFIG, isAcceptedFileType, MAX_FILE_SIZE_BYTES } from '@/lib/documentTypes'
+import { DOCUMENT_TYPE_CONFIG, isAcceptedFileType, MAX_FILE_SIZE_BYTES, MAX_FILE_SIZE_MB } from '@/lib/documentTypes'
 import { DocumentUploadCard } from '@/components/upload/DocumentUploadCard'
 import { UploadSummary } from '@/components/upload/UploadSummary'
 import { Button } from '@/components/common/Button'
@@ -44,7 +44,7 @@ export default function UploadPage() {
       return
     }
     if (file.size > MAX_FILE_SIZE_BYTES) {
-      setErrors((prev) => ({ ...prev, [docType]: 'File exceeds the 50MB size limit.' }))
+      setErrors((prev) => ({ ...prev, [docType]: `File exceeds the ${MAX_FILE_SIZE_MB}MB size limit.` }))
       return
     }
     setErrors((prev) => ({ ...prev, [docType]: undefined }))

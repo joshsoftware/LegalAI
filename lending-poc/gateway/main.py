@@ -34,11 +34,16 @@ APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://127.0.0.1:8000")
 # timeout). These match the timeouts the frontend already budgets for the
 # same calls (see frontend/src/api/{extract,translation,fieldMapping}.ts), so
 # the gateway is never the first link in the chain to give up.
-# TEMP(slow-host testing): raised from 300s to 1800s. Revert before merging.
-OCR_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("OCR_REQUEST_TIMEOUT_SECONDS", "1800"))
-TRANSLATION_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("TRANSLATION_REQUEST_TIMEOUT_SECONDS", "1800"))
-FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS", "1800"))
-APP_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("APP_REQUEST_TIMEOUT_SECONDS", "1800"))
+OCR_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("OCR_REQUEST_TIMEOUT_SECONDS", "300"))
+TRANSLATION_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("TRANSLATION_REQUEST_TIMEOUT_SECONDS", "300"))
+FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS", "300"))
+APP_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("APP_REQUEST_TIMEOUT_SECONDS", "300"))
+
+# Client-level default only — every proxied route passes its own per-request
+# timeout above, which overrides this. Kept as its own knob (not reused from
+# the per-route timeouts) since it's a fallback for routes that forget to
+# pass one, not a real per-service SLA.
+GATEWAY_CLIENT_TIMEOUT_SECONDS = float(os.environ.get("GATEWAY_CLIENT_TIMEOUT_SECONDS", "120"))
 
 # Headers that must not be forwarded as-is between hops (RFC 7230) plus a few
 # that httpx/Starlette will recompute themselves and that would otherwise
@@ -53,21 +58,22 @@ RESPONSE_STRIP_HEADERS = HOP_BY_HOP_HEADERS | {"content-length", "content-encodi
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Client-level default only — every proxied route passes its own
-    # per-request timeout below, which overrides this. Kept in step with those
-    # so a future route that forgets to pass one doesn't silently get a
-    # shorter budget than the rest of the chain.
-    # TEMP(slow-host testing): raised from 120s to 1800s. Revert before merging.
-    app.state.http = httpx.AsyncClient(timeout=1800.0)
+    app.state.http = httpx.AsyncClient(timeout=GATEWAY_CLIENT_TIMEOUT_SECONDS)
     yield
     await app.state.http.aclose()
 
 
 app = FastAPI(title="Lending POC Gateway", lifespan=lifespan)
 
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("ALLOWED_ORIGINS", "*").split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -130,7 +136,7 @@ async def create_case(request: Request) -> Response:
 # --- Per-service health (namespaced since all four modules define /health) ---
 # Liveness probes, not business calls — kept short regardless of the
 # per-service request timeouts above, matching the aggregate /health below.
-HEALTH_PROXY_TIMEOUT_SECONDS = 5.0
+HEALTH_PROXY_TIMEOUT_SECONDS = float(os.environ.get("HEALTH_PROXY_TIMEOUT_SECONDS", "5"))
 
 _HEALTHY_UPSTREAM_STATUSES = frozenset({"healthy", "ok"})
 _KNOWN_UNHEALTHY_UPSTREAM_STATUSES = frozenset(

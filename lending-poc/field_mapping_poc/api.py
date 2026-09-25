@@ -15,6 +15,7 @@ Endpoints:
 import asyncio
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Any, Dict, Literal
 
@@ -71,7 +72,7 @@ STATUS_DETAIL = {
 # Deliberately not OLLAMA_HEALTH_RETRY_SECONDS (5s) — that's how fast our own
 # monitor re-probes, but telling clients to retry that fast just hammers a
 # service that is genuinely down.
-UNAVAILABLE_RETRY_AFTER_SECONDS = 30
+UNAVAILABLE_RETRY_AFTER_SECONDS = int(os.environ.get("UNAVAILABLE_RETRY_AFTER_SECONDS", "30"))
 
 
 class HealthResponse(BaseModel):

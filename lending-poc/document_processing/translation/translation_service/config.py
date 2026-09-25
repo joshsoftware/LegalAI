@@ -17,7 +17,13 @@ from pathlib import Path
 
 # Directory containing .txt files produced by the OCR engine.
 # OCR service writes here → translation service reads from here.
-INPUT_DIR = Path("/Users/josh/Desktop/Josh/inovation_lab/surya_ocr_test/extraction_output/text")
+# Anchored to this file's location so the default doesn't depend on the CWD.
+# parents[2] = document_processing/ (config.py → translation_service → translation → document_processing)
+_DOC_PROCESSING_DIR = Path(__file__).resolve().parents[2]
+INPUT_DIR = Path(os.getenv(
+    "TRANSLATION_INPUT_DIR",
+    str(_DOC_PROCESSING_DIR / "ocr" / "extraction_output" / "text"),
+))
 
 # Directory where translated .txt files are written (created automatically).
 OUTPUT_DIR = Path("./output")
@@ -70,30 +76,10 @@ MODEL_ADAPTER = "ollama"
 # Model identifier passed to the chosen adapter.
 MODEL_NAME = os.getenv("OLLAMA_MODEL", "gemma4:e4b-it-qat")
 
-# Background /health monitor timing (see OllamaAdapter._monitor_loop). The
-# monitor probes Ollama on a background task — never inline in a request — so
-# these control retry/recheck cadence only, never a request timeout.
-#
-# Connect-phase timeout for the monitor's probes ONLY, never a read timeout
-# (see _ping(): the read must stay unbounded so a probe can't abort an
-# in-progress cold model load). Bounds how long a probe waits to establish a
-# TCP connection, so a stopped/unroutable Ollama is reported "unreachable"
-# promptly instead of the probe hanging indefinitely and pinning status.
+
 OLLAMA_PING_CONNECT_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_PING_CONNECT_TIMEOUT_SECONDS", "5"))
-# Read-phase ceiling for model calls — a last-resort bound for an Ollama that
-# accepted the connection but never replies (deadlocked / OOM-stalled), so it
-# can't hold routes.py's _translate_lock forever and kill the endpoint for
-# every later caller. Same env var and value field_mapping_poc uses.
-#
-# CAVEAT worth watching: unlike field-mapping's short JSON outputs, a long
-# document here can legitimately generate for a long time (MODEL_OPTIONS sets
-# num_predict=16384, and CPU generation has been measured around 3.5 tok/s).
-# So a large enough document could hit this ceiling and be cut off mid-answer,
-# discarding real work. If long translations start failing at this ceiling,
-# this is the knob — raise it rather than assuming Ollama is broken.
-# TEMP(slow-host testing): raised from 600s to 1800s, matching the gateway's
-# raised proxy timeout. Revert before merging.
-OLLAMA_REQUEST_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "1800"))
+
+OLLAMA_REQUEST_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "300"))
 # Fast retry interval while consecutive failures are within the limit below.
 OLLAMA_HEALTH_RETRY_SECONDS = float(os.getenv("OLLAMA_HEALTH_RETRY_SECONDS", "5"))
 # How many consecutive failures before backing off to the slower interval.
@@ -111,9 +97,8 @@ OLLAMA_HEALTH_RECHECK_SECONDS = float(os.getenv("OLLAMA_HEALTH_RECHECK_SECONDS",
 
 MODEL_OPTIONS: dict = {
     # Maximum tokens the model will generate per document.
-    "num_predict": 16384,
-    # Context window: must fit prompt + terminology block + full document.
-    "num_ctx": 32768,
+    "num_predict": int(os.getenv("TRANSLATION_NUM_PREDICT", "16384")),
+    "num_ctx": int(os.getenv("OLLAMA_NUM_CTX", "32768")),
 }
 
 # ---------------------------------------------------------------------------
