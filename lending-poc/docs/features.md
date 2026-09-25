@@ -21,7 +21,8 @@ Before anything else runs, the pipeline checks that all of `AADHAAR`, `PAN`, `SA
 
 The Golden Record is the single trusted identity profile for the applicant, built by merging the KYC documents:
 
-- **Address & DOB**: sourced from `AADHAAR`. If Aadhaar has no address, `ADDRESS_PROOF` is used as a fallback.
+- **Address**: sourced from `AADHAAR` only. If Aadhaar carries no address, the Golden Record simply has none — there is no fallback document, and address is not a mandatory Golden Record field, so this does not fail the case.
+- **DOB**: `AADHAAR` is primary, `PAN` is a fallback used only when Aadhaar carries no DOB. Both documents print a date of birth, so the two can genuinely disagree; that disagreement is deliberately *not* resolved here — it is left for the DOB check in §3.2 to compare and score. Unlike names there is no "fuller value" to prefer, so this is plain precedence rather than a similarity heuristic.
 - **Aadhaar number**: from `AADHAAR`.
 - **PAN number**: from `PAN`.
 - **Name**: the more interesting case.
@@ -29,7 +30,6 @@ The Golden Record is the single trusted identity profile for the applicant, buil
   - If both have a name, and they're recognizably the same person (`fuzzy.name_similarity` >= `NAME_MATCH_THRESHOLD`, 85), the **fuller** name (more tokens) wins — e.g. "Sneha Sunil Lokhande" over "Sneha Lokhande" — because it carries strictly more identity information.
   - If the two names *aren't* recognizably related, Aadhaar stays authoritative and the mismatch is left for the NAME identity check to flag, rather than silently trusting an unrelated "fuller" name.
 - The chosen name is split into `first_name` / `middle_name` / `last_name`.
-- If an address was resolved, an address embedding is computed (`app.matching.embeddings.get_address_embedding`) and stored for later similarity checks.
 
 Each golden field also records its `*_source` (which document it came from), useful for traceability.
 
@@ -47,16 +47,26 @@ Every document that carries an identity field is compared against the Golden Rec
 
 | Document | Fields checked |
 |---|---|
-| AADHAAR | name, address, aadhaar_number, DOB |
-| PAN | name, pan_number |
-| ADDRESS_PROOF | address |
+| AADHAAR | name, DOB — *minus whichever it sourced, see §3.3* |
+| PAN | name, DOB — *minus whichever it sourced, see §3.3* |
 | Each SALARY_SLIP | name |
 | BANK_STATEMENT | name |
 
 Matching strategies (`app/matching/`):
 - **NAME** — fuzzy string similarity (`fuzzy.name_similarity`), handles reordering (surname-first), initials, and minor spelling differences. Passes at >= 85.
-- **ADDRESS** — embedding cosine similarity (`embeddings.address_similarity`), tolerant of differently-worded but equivalent addresses (e.g. "Apartment" vs "Flat", "MH" vs "Maharashtra"). Passes at >= 0.55 similarity (scored as similarity × 100).
-- **AADHAAR / PAN / DOB** — exact matching (`app.matching.exact`). Result is `MATCH` (score 100), `NO_MATCH` (score 0), or `INCONCLUSIVE` (score 50, e.g. one side missing/unparseable).
+- **DOB** — exact matching (`app.matching.exact`). Result is `MATCH` (score 100), `NO_MATCH` (score 0), or `INCONCLUSIVE` (score 50, e.g. one side missing/unparseable).
+
+**Why only name and DOB.** A comparison is only meaningful when its two sides have independent provenance. Name appears on all four documents and DOB on two (Aadhaar and PAN), so those can genuinely disagree. Address, the Aadhaar number and the PAN number each have exactly **one** source document, and the Golden Record copies that value verbatim — comparing a document's value back against the Golden Record compared a value with itself and always scored 100. Such a check cannot fail, and because `compute_score` renormalizes by observed weight, those guaranteed 100s actively pulled borderline cases *up* toward the pass threshold. Together they accounted for 0.40 of the weight table, all padding.
+
+All three values are still resolved onto the Golden Record and still required to be **present** — `check_mandatory_presence` (§3.1) is unchanged and remains the trigger for the hard-`FAIL` path. "Does this applicant have a PAN at all?" is a real question; "does the PAN match itself?" is not. `exact.aadhaar_match` and `exact.pan_match` are retained in `app/matching/exact.py` (including the masked-Aadhaar suffix logic) for the day a second source appears — e.g. a Form 16 or a KYC-bearing bank statement.
+
+### 3.3 A document is never checked against a value it supplied
+
+The same provenance rule applies one level down, inside the checks that do survive. `build_golden_record` records where each value came from (`name_source`, `dob_source`), and a document is skipped for any field it sourced itself.
+
+Without this, the DOB check was half-blind. With the golden DOB taken from Aadhaar, Aadhaar's own comparison scored a guaranteed 100; a PAN that contradicted it outright scored 0; the component averaged to **50**, not 0 — and at weight 0.10 that was not enough to move a clean case out of `PASS`. Skipping the self-comparison lets a genuine contradiction score 0, which drops such a case to `NEEDS_REVIEW` with reason `DOB:dob_differs`.
+
+The consequence to be aware of: a field whose only source is the document that supplied it now produces **no result at all** rather than a free 100 — e.g. DOB when the PAN extraction yielded none. That is deliberate. The value is present but *uncorroborated*, and `compute_score` renormalizes over observed check types, so contributing nothing is neutral rather than a free pass. (`SALARY_CREDIT_COUNT` always fires for any case that clears the §1 precheck, so the observed weight can never reach zero.)
 
 ## 4. Business Validation (`app/services/business_validation.py`)
 
@@ -90,14 +100,16 @@ Given every `ValidationResult` produced above:
    | Check | Weight |
    |---|---|
    | NAME | 0.15 |
-   | ADDRESS | 0.10 |
-   | AADHAAR | 0.15 |
-   | PAN | 0.15 |
    | DOB | 0.10 |
    | EMPLOYER | 0.10 |
    | SALARY_CREDIT_COUNT | 0.25 |
+   | SALARY_CONTINUITY | 0.10 |
 
-3. The overall score is the weighted average, **renormalized over only the check types actually observed** in this case (so a case missing an optional check type doesn't get unfairly diluted by a zero for a check that never ran). Note `SALARY_DATE` itself isn't in the weight table — it gates whether a credit was found at all, but the weighted score is driven by `EMPLOYER` and `SALARY_CREDIT_COUNT`.
+   These do not sum to 1.0 and do not need to: step 3 divides by the total weight of the check types actually observed, so they are read as ratios to each other rather than as percentages.
+
+3. The overall score is the weighted average, **renormalized over only the check types actually observed** in this case (so a case missing an optional check type doesn't get unfairly diluted by a zero for a check that never ran).
+
+   Only check types that *can* fail appear in the table. `SALARY_DATE` is excluded because it gates other checks rather than scoring — whether a slip matched drives `EMPLOYER`'s score and `SALARY_CREDIT_COUNT`'s numerator, which carry its influence at a combined 0.35. `AADHAAR` and `PAN` are excluded because they are now only emitted by the mandatory-presence check (§3.2). All three still appear in `component_scores` for display and audit; they simply do not move `overall_score`.
 
 ## 6. Decision Engine (`app/services/decision_engine.py`)
 
@@ -113,7 +125,7 @@ Final decision logic, in priority order:
 A successful pipeline run is persisted in a single DB transaction:
 - One `Case` row (`applicant_ref`, `status` derived from the decision: PASS/FAIL/NEEDS_REVIEW).
 - One `Document` row per submitted document (including one per salary slip), storing `extracted_fields` as JSON.
-- One `GoldenRecord` row (name, address + embedding, Aadhaar/PAN numbers, DOB).
+- One `GoldenRecord` row (name, address, Aadhaar/PAN numbers, DOB).
 - One `ValidationResult` row per check performed, linked back to the specific document it was evaluated against where applicable.
 - One `PipelineResult` row with the overall score, decision, and reasons.
 
@@ -124,8 +136,7 @@ Document primary keys are resolved via an in-memory `doc_id -> Document.id` map 
 | `doc_type` | Purpose |
 |---|---|
 | `AADHAAR` | Primary identity source (name, address, DOB, Aadhaar number) |
-| `PAN` | Secondary identity source (name, PAN number) |
-| `ADDRESS_PROOF` | Address fallback if Aadhaar has none |
+| `PAN` | Secondary identity source (name, PAN number, DOB) |
 | `SALARY_SLIP` | Declared income; multiple allowed per case (one per month) |
 | `BANK_STATEMENT` | Source of truth for actual salary credits |
 
@@ -137,7 +148,6 @@ All thresholds/weights are centralized here as plain constants (intended to move
 |---|---|---|
 | `NAME_MATCH_THRESHOLD` | 85.0 | Min fuzzy score for NAME to pass |
 | `EMPLOYER_MATCH_THRESHOLD` | 80.0 | Min fuzzy score for EMPLOYER to pass |
-| `ADDRESS_SIMILARITY_THRESHOLD` | 0.55 | Min cosine similarity for ADDRESS to pass |
 | `SALARY_CREDIT_EXTRA_MONTHS` | 1 | Months the salary-credit search window extends past the declared month |
 | `SALARY_CREDIT_BUFFER_DAYS` | 5 | Days the window starts before the declared month |
 | `TXN_SELECTION_EMPLOYER_WEIGHT` | 0.70 | Weight of narration similarity in transaction selection |

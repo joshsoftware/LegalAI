@@ -69,6 +69,44 @@ MODEL_ADAPTER = "ollama"
 
 # Model identifier passed to the chosen adapter.
 MODEL_NAME = os.getenv("OLLAMA_MODEL", "gemma4:e4b-it-qat")
+<<<<<<< HEAD
+=======
+
+# Background /health monitor timing (see OllamaAdapter._monitor_loop). The
+# monitor probes Ollama on a background task — never inline in a request — so
+# these control retry/recheck cadence only, never a request timeout.
+#
+# Connect-phase timeout for the monitor's probes ONLY, never a read timeout
+# (see _ping(): the read must stay unbounded so a probe can't abort an
+# in-progress cold model load). Bounds how long a probe waits to establish a
+# TCP connection, so a stopped/unroutable Ollama is reported "unreachable"
+# promptly instead of the probe hanging indefinitely and pinning status.
+OLLAMA_PING_CONNECT_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_PING_CONNECT_TIMEOUT_SECONDS", "5"))
+# Read-phase ceiling for model calls — a last-resort bound for an Ollama that
+# accepted the connection but never replies (deadlocked / OOM-stalled), so it
+# can't hold routes.py's _translate_lock forever and kill the endpoint for
+# every later caller. Same env var and value field_mapping_poc uses.
+#
+# CAVEAT worth watching: unlike field-mapping's short JSON outputs, a long
+# document here can legitimately generate for a long time (MODEL_OPTIONS sets
+# num_predict=16384, and CPU generation has been measured around 3.5 tok/s).
+# So a large enough document could hit this ceiling and be cut off mid-answer,
+# discarding real work. If long translations start failing at this ceiling,
+# this is the knob — raise it rather than assuming Ollama is broken.
+# TEMP(slow-host testing): raised from 600s to 1800s, matching the gateway's
+# raised proxy timeout. Revert before merging.
+OLLAMA_REQUEST_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "1800"))
+# Fast retry interval while consecutive failures are within the limit below.
+OLLAMA_HEALTH_RETRY_SECONDS = float(os.getenv("OLLAMA_HEALTH_RETRY_SECONDS", "5"))
+# How many consecutive failures before backing off to the slower interval.
+OLLAMA_HEALTH_MAX_FAST_RETRIES = int(os.getenv("OLLAMA_HEALTH_MAX_FAST_RETRIES", "12"))
+# Slow retry interval once the fast-retry budget is exhausted — keeps trying
+# forever, just less aggressively, so the service self-heals without a restart.
+OLLAMA_HEALTH_BACKOFF_SECONDS = float(os.getenv("OLLAMA_HEALTH_BACKOFF_SECONDS", "120"))
+# Reconfirmation interval once status is "ok", so a later Ollama outage is
+# eventually reflected again instead of leaving /health stuck on stale "ok".
+OLLAMA_HEALTH_RECHECK_SECONDS = float(os.getenv("OLLAMA_HEALTH_RECHECK_SECONDS", "30"))
+>>>>>>> b123ae5bd3b28c3967f2bab28ee35a404ca093b5
 
 # ---------------------------------------------------------------------------
 # Model options  (adapter-specific — passed through as-is)

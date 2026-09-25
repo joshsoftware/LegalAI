@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Single public FastAPI entrypoint that fronts the three independent
-document-processing services (OCR, translation, field-mapping).
+"""Single public FastAPI entrypoint that fronts the four independent
+backend services (OCR, translation, field-mapping, and the core app/cases
+API).
 
 Each backend module keeps running exactly as it already does today, in its
 own process/venv, on its own internal port. This gateway does not import or
@@ -23,10 +24,21 @@ from fastapi.responses import JSONResponse, Response
 OCR_BASE_URL = os.environ.get("OCR_BASE_URL", "http://127.0.0.1:8010")
 TRANSLATION_BASE_URL = os.environ.get("TRANSLATION_BASE_URL", "http://127.0.0.1:8001")
 FIELD_MAPPING_BASE_URL = os.environ.get("FIELD_MAPPING_BASE_URL", "http://127.0.0.1:8002")
-# Surya on a CPU-only WSL host can take several minutes per handwritten page.
-# Keep this aligned with the browser timeout so the gateway does not terminate
-# a valid OCR request while the OCR worker is still generating text.
+APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://127.0.0.1:8000")
+
+# Per-service request timeouts. Every backend has a model somewhere in its
+# path and can legitimately run for minutes — OCR calls Surya,
+# translation/field-mapping call Ollama, and /cases loads a
+# sentence-transformers embedding model on its first request (downloading it
+# from HuggingFace if it isn't cached yet, which alone outlasts any short
+# timeout). These match the timeouts the frontend already budgets for the
+# same calls (see frontend/src/api/{extract,translation,fieldMapping}.ts), so
+# the gateway is never the first link in the chain to give up.
+# TEMP(slow-host testing): raised from 300s to 1800s. Revert before merging.
 OCR_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("OCR_REQUEST_TIMEOUT_SECONDS", "1800"))
+TRANSLATION_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("TRANSLATION_REQUEST_TIMEOUT_SECONDS", "1800"))
+FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS", "1800"))
+APP_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("APP_REQUEST_TIMEOUT_SECONDS", "1800"))
 
 # Headers that must not be forwarded as-is between hops (RFC 7230) plus a few
 # that httpx/Starlette will recompute themselves and that would otherwise
@@ -41,7 +53,12 @@ RESPONSE_STRIP_HEADERS = HOP_BY_HOP_HEADERS | {"content-length", "content-encodi
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.http = httpx.AsyncClient(timeout=httpx.Timeout(30.0))
+    # Client-level default only — every proxied route passes its own
+    # per-request timeout below, which overrides this. Kept in step with those
+    # so a future route that forgets to pass one doesn't silently get a
+    # shorter budget than the rest of the chain.
+    # TEMP(slow-host testing): raised from 120s to 1800s. Revert before merging.
+    app.state.http = httpx.AsyncClient(timeout=1800.0)
     yield
     await app.state.http.aclose()
 
@@ -57,7 +74,7 @@ app.add_middleware(
 )
 
 
-async def _proxy(request: Request, base_url: str, path: str) -> Response:
+async def _proxy(request: Request, base_url: str, path: str, timeout: float) -> Response:
     client: httpx.AsyncClient = request.app.state.http
     headers = {k: v for k, v in request.headers.items() if k.lower() not in REQUEST_STRIP_HEADERS}
     body = await request.body()
@@ -84,43 +101,100 @@ async def _proxy(request: Request, base_url: str, path: str) -> Response:
 
 
 # --- Business endpoints (unprefixed — these paths don't collide across the
-# three modules, so the frontend needs no path changes beyond one base URL) ---
+# four modules, so the frontend needs no path changes beyond one base URL) ---
 
 @app.post("/extract")
 async def extract(request: Request) -> Response:
-    return await _proxy(request, OCR_BASE_URL, "/extract")
+    return await _proxy(request, OCR_BASE_URL, "/extract", timeout=OCR_REQUEST_TIMEOUT_SECONDS)
 
 
 @app.post("/translate/text")
 async def translate_text(request: Request) -> Response:
-    return await _proxy(request, TRANSLATION_BASE_URL, "/translate/text")
+    return await _proxy(request, TRANSLATION_BASE_URL, "/translate/text", timeout=TRANSLATION_REQUEST_TIMEOUT_SECONDS)
 
 
 @app.post("/translate/files")
 async def translate_files(request: Request) -> Response:
-    return await _proxy(request, TRANSLATION_BASE_URL, "/translate/files")
+    return await _proxy(request, TRANSLATION_BASE_URL, "/translate/files", timeout=TRANSLATION_REQUEST_TIMEOUT_SECONDS)
 
 
 @app.post("/map")
 async def map_fields(request: Request) -> Response:
-    return await _proxy(request, FIELD_MAPPING_BASE_URL, "/map")
+    return await _proxy(request, FIELD_MAPPING_BASE_URL, "/map", timeout=FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS)
 
 
-# --- Per-service health (namespaced since all three modules define /health) ---
+@app.post("/cases")
+async def create_case(request: Request) -> Response:
+    return await _proxy(request, APP_BASE_URL, "/cases", timeout=APP_REQUEST_TIMEOUT_SECONDS)
+
+
+# --- Per-service health (namespaced since all four modules define /health) ---
+# Liveness probes, not business calls — kept short regardless of the
+# per-service request timeouts above, matching the aggregate /health below.
+HEALTH_PROXY_TIMEOUT_SECONDS = 5.0
+
+_HEALTHY_UPSTREAM_STATUSES = frozenset({"healthy", "ok"})
+_KNOWN_UNHEALTHY_UPSTREAM_STATUSES = frozenset(
+    {"unhealthy", "unreachable", "initializing", "degraded"}
+)
+
+
+def _status_from_upstream(resp: httpx.Response) -> str:
+    if resp.status_code >= 500:
+        try:
+            body_status = resp.json().get("status")
+        except ValueError:
+            body_status = None
+        if isinstance(body_status, str) and body_status:
+            if body_status in _HEALTHY_UPSTREAM_STATUSES:
+                return f"unhealthy ({resp.status_code})"
+            return body_status
+        return f"unhealthy ({resp.status_code})"
+
+    if resp.status_code >= 400:
+        return f"unhealthy ({resp.status_code})"
+
+    try:
+        body_status = resp.json().get("status")
+    except ValueError:
+        body_status = None
+
+    if not isinstance(body_status, str) or not body_status:
+        return "unhealthy"
+
+    if body_status in _HEALTHY_UPSTREAM_STATUSES:
+        return "healthy"
+    if body_status in _KNOWN_UNHEALTHY_UPSTREAM_STATUSES:
+        return body_status
+    return body_status
+
+
+async def _probe_service(client: httpx.AsyncClient, base_url: str) -> str:
+    try:
+        resp = await client.get(f"{base_url}/health", timeout=HEALTH_PROXY_TIMEOUT_SECONDS)
+    except httpx.RequestError:
+        return "unreachable"
+    return _status_from_upstream(resp)
+
 
 @app.get("/ocr/health")
 async def ocr_health(request: Request) -> Response:
-    return await _proxy(request, OCR_BASE_URL, "/health")
+    return await _proxy(request, OCR_BASE_URL, "/health", timeout=HEALTH_PROXY_TIMEOUT_SECONDS)
 
 
 @app.get("/translation/health")
 async def translation_health(request: Request) -> Response:
-    return await _proxy(request, TRANSLATION_BASE_URL, "/health")
+    return await _proxy(request, TRANSLATION_BASE_URL, "/health", timeout=HEALTH_PROXY_TIMEOUT_SECONDS)
 
 
 @app.get("/field-mapping/health")
 async def field_mapping_health(request: Request) -> Response:
-    return await _proxy(request, FIELD_MAPPING_BASE_URL, "/health")
+    return await _proxy(request, FIELD_MAPPING_BASE_URL, "/health", timeout=HEALTH_PROXY_TIMEOUT_SECONDS)
+
+
+@app.get("/app/health")
+async def app_health(request: Request) -> Response:
+    return await _proxy(request, APP_BASE_URL, "/health", timeout=HEALTH_PROXY_TIMEOUT_SECONDS)
 
 
 @app.get("/health")
@@ -131,12 +205,9 @@ async def health(request: Request) -> dict:
         ("ocr", OCR_BASE_URL),
         ("translation", TRANSLATION_BASE_URL),
         ("field_mapping", FIELD_MAPPING_BASE_URL),
+        ("app", APP_BASE_URL),
     ):
-        try:
-            resp = await client.get(f"{base}/health", timeout=5.0)
-            statuses[name] = "healthy" if resp.status_code == 200 else f"unhealthy ({resp.status_code})"
-        except httpx.RequestError:
-            statuses[name] = "unreachable"
+        statuses[name] = await _probe_service(client, base)
 
     overall = "healthy" if all(v == "healthy" for v in statuses.values()) else "degraded"
     return {"status": overall, "services": statuses}
@@ -151,9 +222,11 @@ async def root() -> dict:
             "POST /translate/text": "Translate text (proxies document_processing/translation)",
             "POST /translate/files": "Translate files (proxies document_processing/translation)",
             "POST /map": "Field mapping (proxies field_mapping_poc)",
-            "GET /health": "Aggregated health of all three backend services",
+            "POST /cases": "Case submission and decisioning (proxies app)",
+            "GET /health": "Aggregated health of all four backend services",
             "GET /ocr/health": "OCR service health",
             "GET /translation/health": "Translation service health",
             "GET /field-mapping/health": "Field mapping service health",
+            "GET /app/health": "App (cases) service health",
         },
     }

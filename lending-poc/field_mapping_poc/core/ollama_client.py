@@ -5,16 +5,40 @@ Keeping this isolated means:
 - if Ollama gets swapped for vLLM / a hosted endpoint later, this is
   the only file that needs to change.
 - retry / timeout / error-handling logic lives in exactly one place.
+
+Incident notes — read before touching _ping()/health_status(): a chat()
+call must NEVER be given a client-side READ timeout. Ollama treats the
+client closing that connection as cancellation and aborts an in-progress
+cold model load outright. A short-timeout health probe around chat() caused
+a load/timeout/abort loop that never let the model finish loading. See the
+same issue documented in translation_service's ollama_adapter.py, which
+this monitor mirrors. So: never race a health ping's read against a timeout,
+and never call it synchronously inside a request handler.
+
+The CONNECT phase is different and must stay bounded — leaving it unbounded
+too meant a stopped Ollama hung the probe forever, pinning status at
+"initializing". See _ping() and _monitor_loop() below.
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 import time
 from typing import Optional
 
+import httpx
 import ollama
 
-from config import OLLAMA
+from config import (
+    OLLAMA,
+    OLLAMA_PING_CONNECT_TIMEOUT_SECONDS,
+    OLLAMA_HEALTH_RETRY_SECONDS,
+    OLLAMA_HEALTH_MAX_FAST_RETRIES,
+    OLLAMA_HEALTH_BACKOFF_SECONDS,
+    OLLAMA_HEALTH_RECHECK_SECONDS,
+    OLLAMA_HEALTH_MONITOR_OFFSET_SECONDS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,12 +60,48 @@ class OllamaClient:
         self.temperature = temperature
         self.num_ctx = num_ctx
         self.max_retries = max_retries
-        self._client = ollama.Client(host=host, timeout=OLLAMA.request_timeout)
+        # Real request path. CONNECT is bounded short (either Ollama is
+        # listening or it isn't — a bare timeout=N would apply N to the
+        # connect phase too, so a silently-dropped connection would stall for
+        # the full circuit-breaker window). READ carries the circuit breaker:
+        # long enough to never cut a legitimate cold load, short enough that a
+        # wedged Ollama eventually releases _map_lock. See request_timeout in
+        # config.py.
+        self._client = ollama.Client(
+            host=host,
+            timeout=httpx.Timeout(
+                connect=OLLAMA_PING_CONNECT_TIMEOUT_SECONDS,
+                read=OLLAMA.request_timeout,
+                write=OLLAMA.request_timeout,
+                pool=OLLAMA.request_timeout,
+            ),
+        )
+        # Separate client for health pings: bounded CONNECT, unbounded READ.
+        # See _ping() for why the read side must stay unbounded.
+        self._ping_client = ollama.Client(
+            host=host,
+            timeout=httpx.Timeout(
+                connect=OLLAMA_PING_CONNECT_TIMEOUT_SECONDS,
+                read=None,
+                write=None,
+                pool=None,
+            ),
+        )
+        # Reachability probe client: short TOTAL timeout is safe here because
+        # it only ever hits /api/tags, which lists model files on disk and
+        # never triggers a model load — so it carries no abort-a-load risk.
+        self._reachability_client = ollama.Client(
+            host=host, timeout=OLLAMA_PING_CONNECT_TIMEOUT_SECONDS
+        )
+        self._status = "initializing"
+        self._monitor_task: Optional[asyncio.Task] = None
 
     def generate_json(self, system_prompt: str, user_prompt: str) -> str:
         """
         Calls the model in JSON mode and returns the raw string response.
         Retries on transient failures with linear backoff (1s, 2s, ...).
+
+        Read timeouts are deliberately NOT retried — see below.
         """
         last_error: Optional[Exception] = None
 
@@ -64,6 +124,24 @@ class OllamaClient:
                     raise OllamaClientError("Model returned empty content")
                 return content
 
+            except httpx.ReadTimeout as exc:
+                # Circuit breaker tripped: we already waited the full read
+                # window. Retrying re-waits it from scratch (3 attempts =
+                # 3x the window of a held _map_lock), and the timeout just
+                # made Ollama abort whatever it was loading, so the retry
+                # starts an even slower attempt. Give up now.
+                #
+                # Note this is ReadTimeout specifically, NOT TimeoutException:
+                # ConnectTimeout subclasses that and IS worth retrying, since
+                # it fails fast and Ollama may just be mid-restart.
+                logger.error(
+                    "Ollama read timed out after %ss (attempt %d); not retrying",
+                    OLLAMA.request_timeout, attempt,
+                )
+                raise OllamaClientError(
+                    f"Ollama did not respond within {OLLAMA.request_timeout}s"
+                ) from exc
+
             except Exception as exc:  # noqa: BLE001 - retry on anything transient
                 last_error = exc
                 logger.warning(
@@ -76,3 +154,186 @@ class OllamaClient:
         raise OllamaClientError(
             f"Ollama call failed after {self.max_retries + 1} attempts"
         ) from last_error
+
+    def _ping(self) -> None:
+        """
+        Blocking probe backing the background monitor.
+
+        Timeout split matters here (see module docstring):
+        - READ is unbounded. A cold model load can take minutes, and cutting
+          the connection mid-load makes Ollama abort the load outright.
+        - CONNECT is bounded. Refusing to bound it too was a real bug: with
+          Ollama stopped, the probe hung indefinitely, so status never left
+          "initializing", the /map fail-fast gate never fired, and requests
+          piled up on a doomed call. A connect timeout can't abort a load —
+          if the socket is established, the model is by definition loading.
+
+        Uses the same num_ctx as generate_json() so the ping itself can never
+        force a reload by asking for a different context size.
+        """
+        self._ping_client.chat(
+            model=self.model,
+            messages=[{"role": "user", "content": "ping"}],
+            options={"num_ctx": self.num_ctx, "num_predict": 1},
+        )
+
+    def _probe_reachable(self) -> None:
+        """
+        Cheap "is the Ollama server up?" check, independent of model state.
+        Hits /api/tags (a disk listing), so it answers fast even while a
+        model is cold-loading, and can't abort that load.
+
+        This is what separates "unreachable" from "initializing": the server
+        being up but the model not yet answering is precisely "initializing".
+        """
+        self._reachability_client.list()
+
+    def health_status(self) -> str:
+        """
+        Instant, non-blocking read for the FastAPI /health route. Never
+        calls Ollama itself — reflects whatever the background monitor
+        (started via start_monitoring()) last observed.
+        """
+        return self._status
+
+    async def start_monitoring(self) -> None:
+        """Begin the background readiness monitor backing health_status()."""
+        self._monitor_task = asyncio.create_task(self._monitor_loop())
+
+    async def stop_monitoring(self) -> None:
+        """
+        Stop the background monitor started by start_monitoring().
+
+        Awaits the cancellation rather than just requesting it: cancel() only
+        schedules a CancelledError into the task, so returning immediately can
+        leave it still pending when the event loop closes ("Task was destroyed
+        but it is pending!"). Awaiting re-raises that CancelledError here,
+        hence the suppress.
+
+        Caveat: if the loop is parked in `await asyncio.to_thread(self._ping)`,
+        cancelling abandons the await but cannot interrupt the worker thread —
+        it runs until the blocking HTTP call returns, bounded by the read
+        timeout on _client.
+        """
+        if self._monitor_task and not self._monitor_task.done():
+            self._monitor_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._monitor_task
+
+    async def _monitor_loop(self) -> None:
+        """
+        Background loop backing health_status(). Runs _ping() on a worker
+        thread with its READ phase unbounded and never cancelled mid-flight,
+        so it can never trigger the abort-on-close incident described in the
+        module docstring (only its connect phase is bounded, which is safe —
+        see _ping()). Starts with a one-time offset so
+        this service's steady-state pings land staggered relative to
+        translation_service's own independent monitor, which pings the same
+        shared Ollama model on the same cadence — see
+        OLLAMA_HEALTH_MONITOR_OFFSET_SECONDS in config.py.
+        """
+        await asyncio.sleep(OLLAMA_HEALTH_MONITOR_OFFSET_SECONDS)
+
+        # Counts _ping() failures only. The reachability probe below keeps its
+        # own (fast, non-escalating) cadence — see there for why.
+        ping_failures = 0
+        # Monotonic timestamp of the last successful _ping(), so the expensive
+        # model ping keeps its slow cadence while the loop itself ticks fast.
+        # See the "ping due?" check below.
+        last_ok_ping = 0.0
+        while True:
+            # Two-phase probe, so each status means exactly one thing and
+            # never flaps between them while a probe is in flight:
+            #   server down                  -> "unreachable"
+            #   server up, model not ready   -> "initializing"
+            #   model answered               -> "ok"
+            # Getting this wrong is not cosmetic — api.py's /map gate 503s on
+            # "unreachable" only, so a status that briefly reads the wrong
+            # value either lets doomed requests pile up on _map_lock or
+            # rejects cold-load requests that would have succeeded.
+            try:
+                await asyncio.to_thread(self._probe_reachable)
+            except Exception as exc:
+                # Deliberately NOT _backoff(). That escalates to
+                # OLLAMA_HEALTH_BACKOFF_SECONDS, which is sized for the
+                # expensive _ping() below — a real model call that can trigger
+                # a load. This probe is a TCP connect to a local port that
+                # fails instantly on connection-refused, so polling it at the
+                # fast interval indefinitely costs nothing.
+                #
+                # Sharing one escalating backoff between the two meant a
+                # stopped Ollama dragged this cheap probe down to the ping's
+                # cadence, so the monitor slept through Ollama coming back and
+                # /health kept reporting "unreachable" for up to the backoff
+                # window after it was already serving.
+                #
+                # Logged on transition only: at this cadence, per-attempt
+                # logging would spam a line every few seconds through an outage.
+                if self._status != "unreachable":
+                    logger.warning("OllamaClient monitor: Ollama unreachable (%s)", exc)
+                self._status = "unreachable"
+                # A down server says nothing about the model's health, so these
+                # failures must not feed the ping path's escalation.
+                ping_failures = 0
+                await asyncio.sleep(OLLAMA_HEALTH_RETRY_SECONDS)
+                continue
+
+            # Server is up. Anything not yet confirmed working is a model
+            # that hasn't answered yet — report that honestly rather than
+            # holding a stale "unreachable" through a multi-minute cold load
+            # (which would make the gate reject requests that would succeed).
+            # Guarded so a healthy service never dips out of "ok" mid-recheck.
+            if self._status != "ok":
+                self._status = "initializing"
+
+            # Is the expensive ping due? While healthy, re-confirming the model
+            # every OLLAMA_HEALTH_RECHECK_SECONDS is plenty — but that interval
+            # must not also gate the cheap probe above. Sleeping it wholesale
+            # (what this loop used to do) left the monitor parked for up to a
+            # full recheck interval, so a stopped Ollama kept reporting "ok"
+            # that whole time and the /map gate waved requests through.
+            #
+            # Ticking at the fast interval instead catches a stopped Ollama
+            # within OLLAMA_HEALTH_RETRY_SECONDS, while the model itself is
+            # still only pinged on the slow cadence.
+            #
+            # Only applies once we're "ok": while "initializing", every
+            # iteration should keep trying to confirm the model is up. That
+            # isn't a busy loop — a ping during a cold load blocks until the
+            # load finishes.
+            if self._status == "ok" and (
+                time.monotonic() - last_ok_ping < OLLAMA_HEALTH_RECHECK_SECONDS
+            ):
+                await asyncio.sleep(OLLAMA_HEALTH_RETRY_SECONDS)
+                continue
+
+            try:
+                await asyncio.to_thread(self._ping)
+                self._status = "ok"
+                last_ok_ping = time.monotonic()
+                ping_failures = 0
+                await asyncio.sleep(OLLAMA_HEALTH_RETRY_SECONDS)
+            except Exception as exc:
+                ping_failures += 1
+                self._status = "unreachable"
+                await self._backoff(ping_failures, exc)
+
+    async def _backoff(self, ping_failures: int, exc: Exception) -> None:
+        """
+        Sleep between failed _ping() attempts: retry quickly at first, then
+        slow down once an outage looks sustained, retrying indefinitely so the
+        service self-heals without a restart.
+
+        Only the ping path uses this. The reachability probe stays on the fast
+        interval forever — see _monitor_loop() for why the two must not share
+        an escalating backoff.
+        """
+        if ping_failures <= OLLAMA_HEALTH_MAX_FAST_RETRIES:
+            delay = OLLAMA_HEALTH_RETRY_SECONDS
+        else:
+            delay = OLLAMA_HEALTH_BACKOFF_SECONDS
+        logger.warning(
+            "OllamaClient monitor: ping failed: %s; retry #%d in %ds",
+            exc, ping_failures, delay,
+        )
+        await asyncio.sleep(delay)

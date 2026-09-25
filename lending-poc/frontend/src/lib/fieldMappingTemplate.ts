@@ -9,32 +9,49 @@ import type { DocType } from '@/store/useAppStore'
 export const FIELD_MAPPING_TEMPLATE: FieldMappingTemplate = [
   {
     document_type: 'salary_slip',
-    document_metadata: {
-      document_date: '',
-      period: { from: 'Mandatory', to: 'Mandatory' },
-      currency: '',
-    },
-    employer: { name: 'Mandatory' },
-    employee: {
-      employee_id: '',
-      name: 'Mandatory',
-      bank_account_number: 'Mandatory',
-      date_of_joining: 'May be imp',
-      days_worked: 'May be imp',
-    },
-    earnings: {
-      basic_per_month: null,
-      gross_per_month: null,
-      allowances_per_month: null,
-      other: null,
-    },
-    deductions: {
-      total: null,
-      tax: null,
-      retirement_contribution: null,
-      other: null,
-    },
-    net_salary: { amount: 'Mandatory', currency: 'Mandatory', amount_in_words: '' },
+    // One entry per slip present in the upload, not per uploaded file.
+    // Applicants submit several months as a single multi-page PDF, and field
+    // mapping runs once per file — so a flat single-slip shape left the model
+    // nowhere to put month 2 and silently dropped it. Same array-of-one-example
+    // convention as `transactions` below, and it matches the /cases contract,
+    // where SALARY_SLIP carries a `salary_slips` array (see docs/cases_api.md).
+    slips: [
+      {
+        document_metadata: {
+          document_date: 'date (YYYY-MM-DD)',
+          period: {
+            from: 'Mandatory, date (YYYY-MM-DD)',
+            to: 'Mandatory, date (YYYY-MM-DD)',
+          },
+          currency: '',
+        },
+        employer: { name: 'Mandatory' },
+        employee: {
+          employee_id: '',
+          name: 'Mandatory',
+          bank_account_number: 'Mandatory',
+          date_of_joining: 'May be imp',
+          days_worked: 'May be imp',
+        },
+        earnings: {
+          basic_per_month: null,
+          gross_per_month: null,
+          allowances_per_month: null,
+          other: null,
+        },
+        deductions: {
+          total: null,
+          tax: null,
+          retirement_contribution: null,
+          other: null,
+        },
+        net_salary: {
+          amount: 'Mandatory, number (no currency symbol or thousands separators)',
+          currency: 'Mandatory',
+          amount_in_words: '',
+        },
+      },
+    ],
   },
   {
     document_type: 'bank_statement',
@@ -53,11 +70,16 @@ export const FIELD_MAPPING_TEMPLATE: FieldMappingTemplate = [
     },
     transactions: [
       {
-        transaction_date: '',
-        description: 'Josh Software',
-        amount: null,
+        transaction_date: 'date (YYYY-MM-DD)',
+        // Was a real company name ("Josh Software"), which a model can copy
+        // straight into its output — that then feeds employer-narration
+        // matching during validation.
+        description: 'string (transaction narration exactly as printed)',
+        amount: 'number (positive magnitude; use direction for credit/debit)',
         currency: '',
-        direction: 'Credited/Debited',
+        // Kept as a word rather than a sign because that is how statements
+        // print it; the frontend mapper folds it into the amount's sign.
+        direction: "'Credited' or 'Debited'",
         balance: null,
       },
     ],
@@ -71,14 +93,14 @@ export const FIELD_MAPPING_TEMPLATE: FieldMappingTemplate = [
   {
     document_type: 'aadhaar',
     name: 'Mandatory',
-    date_of_birth: 'Mandatory',
+    date_of_birth: 'Mandatory, date (YYYY-MM-DD)',
     aadhaar_number: 'Mandatory',
     address: 'Mandatory',
   },
   {
     document_type: 'pan',
     name: 'Mandatory',
-    date_of_birth: 'Mandatory',
+    date_of_birth: 'Mandatory, date (YYYY-MM-DD)',
     pan_number: 'Mandatory',
   },
 ]

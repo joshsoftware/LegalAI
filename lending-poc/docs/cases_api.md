@@ -28,16 +28,10 @@ Adds the `POST /cases` endpoint, the first user-facing entry point into the lend
       "doc_type": "PAN",
       "extracted_fields": {
         "name": "Sneha Lokhande",
-        "pan_number": "ABCDE1234F"
+        "pan_number": "ABCDE1234F",
+        "date_of_birth": "1995-03-14"
       },
       "source_file_ref": "s3://kyc-docs/APP-2026-00123/pan_card.pdf"
-    },
-    {
-      "doc_type": "ADDRESS_PROOF",
-      "extracted_fields": {
-        "address": "Apartment 204, Green Heights, Baner, Pune, MH 411045"
-      },
-      "source_file_ref": "s3://kyc-docs/APP-2026-00123/address_proof.pdf"
     },
     {
       "doc_type": "SALARY_SLIP",
@@ -72,7 +66,8 @@ Notes:
 - `applicant_ref` and `documents` are required.
 - Every document needs `doc_type` and `extracted_fields`; `source_file_ref` is optional.
 - `SALARY_SLIP` is the only `doc_type` that carries a `salary_slips` array instead of a flat `extracted_fields` — a case can include multiple salary slips (one per month).
-- Required document types for a case to proceed: `AADHAAR`, `PAN`, `SALARY_SLIP`, `BANK_STATEMENT`. `ADDRESS_PROOF` is optional (used as an address fallback).
+- `PAN.date_of_birth` is optional on the wire but should be sent whenever the extractor produced it: it is the only value that makes the DOB check a real cross-document comparison rather than Aadhaar's DOB being compared against itself. Like every other date it is format-tolerant (`1995-03-14`, `14/03/1995`, `14-Mar-1995` all work).
+- Accepted document types are exactly `AADHAAR`, `PAN`, `SALARY_SLIP`, `BANK_STATEMENT`, and all four are required for a case to proceed. `documents` is a discriminated union on `doc_type`, so any other value (including the previously accepted `ADDRESS_PROOF`) is rejected with `422 union_tag_invalid`.
 
 ### Response `200 OK`
 
@@ -118,7 +113,58 @@ Notes:
 
 | Status | When |
 |---|---|
-| `400 Bad Request` | The request body fails semantic parsing in `parse_case` (e.g. malformed/missing required fields inside `extracted_fields`). |
+| `400 Bad Request` | One or more values inside `extracted_fields` could not be parsed. |
 | `422 Unprocessable Entity` | The request body fails schema validation (wrong types, missing `applicant_ref`/`documents`). |
+
+#### Value formats
+
+The formats shown above are canonical, but the endpoint is **tolerant on input** —
+values usually originate from an LLM reading a scanned document, so they arrive
+written however the document printed them. `app/services/value_normalization.py`
+accepts, among others:
+
+| Field | Also accepted |
+|---|---|
+| dates | `14-03-1995`, `14/03/1995`, `2026/03/14`, `14 March 1995`, `14-Mar-1995` |
+| `salary_month` | a full date (truncated to its month), `03/2026`, `March 2026`, `Aug 2026` |
+| amounts | `"75,000"`, `"1,23,456"`, `"Rs. 45,000/-"`, `"₹75,000"`, `"$ 4,500.00"`, `"(18,000)"`, `"18,000 Dr"` |
+
+Ambiguous day/month ordering (e.g. `03/04/2026`, where both parts could be a
+month) resolves **day-first**, per `AMBIGUOUS_DATE_ORDER`. Two-digit years are
+rejected rather than guessed at.
+
+A value that is *absent* (missing key, `null`, or blank) is fine — the pipeline
+reports it as a missing field. A value that is *present but unparseable* is
+never silently dropped, because a dropped value would surface downstream as a
+confident, wrong decision. Instead every such value is collected and returned
+together:
+
+```json
+{
+  "detail": {
+    "error": "invalid_field_format",
+    "message": "2 field value(s) could not be parsed.",
+    "fields": [
+      {
+        "document": "AADHAAR",
+        "field": "date_of_birth",
+        "value": "14-03-95",
+        "expected": "a date such as 1995-03-14, 14-03-1995, 14/03/1995 or '14 March 1995'",
+        "reason": "ambiguous_two_digit_year"
+      },
+      {
+        "document": "BANK_STATEMENT",
+        "field": "transactions[1].amount",
+        "value": "abc",
+        "expected": "a number such as 75000, '75,000' or 'Rs. 75,000.00'",
+        "reason": "unrecognised_amount_format"
+      }
+    ]
+  }
+}
+```
+
+Structural problems that are not per-field format failures still return a plain
+string `detail`, so clients should handle both shapes.
 
 If any of `AADHAAR`, `PAN`, `SALARY_SLIP`, `BANK_STATEMENT` is missing from `documents`, the pipeline still returns `200 OK` with `decision: "FAIL"` and reasons like `MISSING_DOCUMENT:PAN` — this is a business decision, not an HTTP error.

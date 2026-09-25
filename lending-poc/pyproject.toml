@@ -11,9 +11,7 @@ dependencies = [
     "alembic>=1.14",
     "pydantic-settings>=2.0",
     "python-dotenv>=1.0",
-    "pgvector>=0.3",
     "cryptography>=43.0",
-    "sentence-transformers>=3.0",
     "rapidfuzz>=3.0",
 ]
 
@@ -28,3 +26,9 @@ dev = [
 [build-system]
 requires = ["setuptools>=75.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The project is run from the repo root rather than pip-installed, so `import
+# app` needs the root on sys.path.
+pythonpath = ["."]

@@ -64,17 +64,14 @@ def _document_rows(case: CaseInput) -> list[tuple[str, Document]]:
             Document(
                 doc_type=DocType.PAN,
                 source_file_ref=case.pan.source_file_ref,
-                extracted_fields={"name": case.pan.name, "pan_number": _mask_pan(case.pan.pan_number)},
-            ),
-        ))
-
-    if case.address_proof:
-        rows.append((
-            case.address_proof.doc_id,
-            Document(
-                doc_type=DocType.ADDRESS_PROOF,
-                source_file_ref=case.address_proof.source_file_ref,
-                extracted_fields={"address": case.address_proof.address},
+                extracted_fields={
+                    "name": case.pan.name,
+                    "pan_number": _mask_pan(case.pan.pan_number),
+                    # Kept in the audit trail because the DOB check compares
+                    # this value against Aadhaar's -- a reviewer looking at a
+                    # failed DOB check needs to see both sides.
+                    "date_of_birth": case.pan.date_of_birth.isoformat() if case.pan.date_of_birth else None,
+                },
             ),
         ))
 
@@ -145,7 +142,6 @@ async def save_pipeline_result(
                 case_id=case.id,
                 name=golden.name,
                 address=golden.address,
-                address_embedding=golden.address_embedding or None,
                 aadhaar_number=golden.aadhaar_number,
                 pan_number=golden.pan_number,
                 date_of_birth=golden.date_of_birth,
