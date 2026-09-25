@@ -108,8 +108,14 @@ services:
       DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql+asyncpg://postgres:postgres@db:5432/lending_poc}
       OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e4b-it-qat}
-      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-1800}
-      SURYA_INFERENCE_URL: http://surya-inference:8000/v1
+      # Read-phase circuit breaker for a wedged Ollama, not a per-request SLA.
+      # Must stay above a real cold load (2+ min — firing mid-load makes Ollama
+      # abort it) but not far past the gateway timeout, since past that
+      # the call still holds field-mapping's request lock with nobody waiting.
+      # Default matches the gateway's 300s. See the matching comment on
+      # request_timeout in field_mapping_poc/config.py.
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-300}
+      SURYA_INFERENCE_URL: ${SURYA_INFERENCE_URL:-http://surya-inference:8000/v1}
       SURYA_INFERENCE_AUTOSTART: "false"
       APP_BASE_URL: http://127.0.0.1:8000
       TRANSLATION_BASE_URL: http://127.0.0.1:8001
