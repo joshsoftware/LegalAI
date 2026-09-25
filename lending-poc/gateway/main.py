@@ -65,7 +65,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Lending POC Gateway", lifespan=lifespan)
 
-ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("ALLOWED_ORIGINS", "*").split(",")
+    if origin.strip()
+]
 
 app.add_middleware(
     CORSMiddleware,
