@@ -79,7 +79,6 @@ async def _proxy(request: Request, base_url: str, path: str, timeout: float) -> 
     headers = {k: v for k, v in request.headers.items() if k.lower() not in REQUEST_STRIP_HEADERS}
     body = await request.body()
     try:
-        timeout = OCR_REQUEST_TIMEOUT_SECONDS if base_url == OCR_BASE_URL else None
         upstream = await client.request(
             request.method,
             f"{base_url}{path}",
