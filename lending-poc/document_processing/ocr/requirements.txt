@@ -7,3 +7,6 @@ pillow
 fastapi
 python-multipart
 uvicorn[standard]
+
+# Background task queue (OCR runs in a Celery worker, brokered via Redis)
+celery[redis]>=5.6,<6
