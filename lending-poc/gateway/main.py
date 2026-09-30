@@ -17,7 +17,9 @@ import os
 from contextlib import asynccontextmanager
 
 import httpx
+from celery import Celery
 from fastapi import FastAPI, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
@@ -25,6 +27,12 @@ OCR_BASE_URL = os.environ.get("OCR_BASE_URL", "http://127.0.0.1:8010")
 TRANSLATION_BASE_URL = os.environ.get("TRANSLATION_BASE_URL", "http://127.0.0.1:8001")
 FIELD_MAPPING_BASE_URL = os.environ.get("FIELD_MAPPING_BASE_URL", "http://127.0.0.1:8002")
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://127.0.0.1:8000")
+
+# Where Celery workers store task state/results (see GET /tasks/{task_id}).
+# The gateway only ever reads from it — it never sends or runs tasks — so it
+# needs no broker and none of the services' task code.
+CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "redis://127.0.0.1:6379/1")
+celery_results = Celery("gateway", backend=CELERY_RESULT_BACKEND)
 
 # Per-service request timeouts. Every backend has a model somewhere in its
 # path and can legitimately run for minutes — OCR calls Surya,
@@ -127,6 +135,34 @@ async def create_case(request: Request) -> Response:
     return await _proxy(request, APP_BASE_URL, "/cases", timeout=APP_REQUEST_TIMEOUT_SECONDS)
 
 
+# --- Background task status (shared by every service that queues Celery
+# tasks, e.g. POST /extract) ---
+
+def _read_task(task_id: str) -> dict:
+    result = celery_results.AsyncResult(task_id)
+    # Celery reports an unknown or expired task id as PENDING too — it can't
+    # tell those apart from a task still waiting in the queue.
+    body: dict = {"task_id": task_id, "status": result.state}
+    if result.state == "SUCCESS":
+        body["result"] = result.result
+    elif result.state == "FAILURE":
+        # On failure, .result holds the exception the task raised.
+        body["error"] = str(result.result)
+    return body
+
+
+@app.get("/tasks/{task_id}")
+async def task_status(task_id: str) -> Response:
+    try:
+        # AsyncResult reads Redis synchronously, so keep it off the event loop.
+        return JSONResponse(content=await run_in_threadpool(_read_task, task_id))
+    except Exception as exc:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": f"Task result store unavailable: {exc}"},
+        )
+
+
 # --- Per-service health (namespaced since all four modules define /health) ---
 # Liveness probes, not business calls — kept short regardless of the
 # per-service request timeouts above, matching the aggregate /health below.
@@ -217,7 +253,8 @@ async def root() -> dict:
     return {
         "message": "Lending POC Gateway",
         "endpoints": {
-            "POST /extract": "OCR text extraction (proxies document_processing/ocr)",
+            "POST /extract": "Queue OCR text extraction; returns a task_id (proxies document_processing/ocr)",
+            "GET /tasks/{task_id}": "Status and result of a queued background task",
             "POST /translate/text": "Translate text (proxies document_processing/translation)",
             "POST /translate/files": "Translate files (proxies document_processing/translation)",
             "POST /map": "Field mapping (proxies field_mapping_poc)",

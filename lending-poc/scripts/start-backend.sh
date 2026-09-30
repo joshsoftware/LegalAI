@@ -40,7 +40,7 @@ wait_healthy() {
   echo "  !!  ${name} did not report healthy on :${port} within 30s (continuing anyway)" >&2
 }
 
-echo "=== 1/5: Ollama server ==="
+echo "=== 1/6: Ollama server ==="
 if pgrep -x "ollama" >/dev/null 2>&1; then
   echo "Ollama already running - skipping."
 else
@@ -56,16 +56,34 @@ if ! ollama pull "${OLLAMA_MODEL}"; then
 fi
 
 echo ""
-echo "=== 2/5: OCR service (internal :${OCR_PORT}) ==="
+echo "=== 2/6: Redis (Celery task queue) ==="
+# Same pattern as Ollama above: reuse a running Redis, else start one. The
+# OCR API only queues uploads in Redis — without it every upload is refused.
+if redis-cli ping >/dev/null 2>&1; then
+  echo "Redis already running - skipping."
+elif command -v redis-server >/dev/null 2>&1; then
+  echo "Starting Redis server..."
+  redis-server --appendonly yes --dir /tmp >/tmp/lending-poc-redis.log 2>&1 &
+  pids+=("$!")
+  sleep 1
+else
+  echo "WARNING: redis-server not found. Install Redis (e.g. 'sudo apt install redis-server') - OCR uploads will fail until it is running." >&2
+fi
+
+echo ""
+echo "=== 3/6: OCR service (internal :${OCR_PORT}) + OCR worker ==="
 cd "$ROOT_DIR/document_processing/ocr"
 [ -d surya-env ] || "$PYTHON_BIN" -m venv surya-env
 surya-env/bin/pip install --upgrade pip --quiet
 surya-env/bin/pip install -r requirements.txt --quiet
 surya-env/bin/python -m uvicorn api:app --host 127.0.0.1 --port "$OCR_PORT" &
 pids+=("$!")
+# The API above only queues uploads; this worker runs the actual OCR.
+surya-env/bin/celery -A tasks worker -Q ocr --concurrency=1 -n ocr@%h --loglevel=INFO &
+pids+=("$!")
 
 echo ""
-echo "=== 3/5: Translation service (internal :${TRANSLATION_PORT}) ==="
+echo "=== 4/6: Translation service (internal :${TRANSLATION_PORT}) ==="
 cd "$ROOT_DIR/document_processing/translation"
 [ -d .venv ] || "$PYTHON_BIN" -m venv .venv
 .venv/bin/pip install --upgrade pip --quiet
@@ -74,7 +92,7 @@ cd "$ROOT_DIR/document_processing/translation"
 pids+=("$!")
 
 echo ""
-echo "=== 4/5: Field mapping service (internal :${FIELD_MAPPING_PORT}) ==="
+echo "=== 5/6: Field mapping service (internal :${FIELD_MAPPING_PORT}) ==="
 cd "$ROOT_DIR/field_mapping_poc"
 [ -d .venv ] || "$PYTHON_BIN" -m venv .venv
 .venv/bin/pip install --upgrade pip --quiet
@@ -89,7 +107,7 @@ wait_healthy "Translation" "$TRANSLATION_PORT"
 wait_healthy "Field mapping" "$FIELD_MAPPING_PORT"
 
 echo ""
-echo "=== 5/5: Gateway (public :${GATEWAY_PORT}) ==="
+echo "=== 6/6: Gateway (public :${GATEWAY_PORT}) ==="
 cd "$ROOT_DIR/gateway"
 [ -d .venv ] || "$PYTHON_BIN" -m venv .venv
 .venv/bin/pip install --upgrade pip --quiet
