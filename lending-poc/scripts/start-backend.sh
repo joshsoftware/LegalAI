@@ -83,21 +83,27 @@ surya-env/bin/celery -A tasks worker -Q ocr --concurrency=1 -n ocr@%h --loglevel
 pids+=("$!")
 
 echo ""
-echo "=== 4/6: Translation service (internal :${TRANSLATION_PORT}) ==="
+echo "=== 4/6: Translation service (internal :${TRANSLATION_PORT}) + worker ==="
 cd "$ROOT_DIR/document_processing/translation"
 [ -d .venv ] || "$PYTHON_BIN" -m venv .venv
 .venv/bin/pip install --upgrade pip --quiet
 .venv/bin/pip install -r requirements.txt --quiet
 .venv/bin/python -m uvicorn api_server:app --host 127.0.0.1 --port "$TRANSLATION_PORT" &
 pids+=("$!")
+# The API above only queues /translate/text; this worker runs the LLM calls.
+.venv/bin/celery -A tasks worker -Q translation --concurrency=1 -n translation@%h --loglevel=INFO &
+pids+=("$!")
 
 echo ""
-echo "=== 5/6: Field mapping service (internal :${FIELD_MAPPING_PORT}) ==="
+echo "=== 5/6: Field mapping service (internal :${FIELD_MAPPING_PORT}) + worker ==="
 cd "$ROOT_DIR/field_mapping_poc"
 [ -d .venv ] || "$PYTHON_BIN" -m venv .venv
 .venv/bin/pip install --upgrade pip --quiet
 .venv/bin/pip install -r requirements.txt --quiet
 .venv/bin/python -m uvicorn api:app --host 127.0.0.1 --port "$FIELD_MAPPING_PORT" &
+pids+=("$!")
+# The API above only queues mappings; this worker runs the LLM calls.
+.venv/bin/celery -A tasks worker -Q field_mapping --concurrency=1 -n field_mapping@%h --loglevel=INFO &
 pids+=("$!")
 
 echo ""

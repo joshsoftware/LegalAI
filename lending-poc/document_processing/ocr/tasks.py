@@ -22,12 +22,18 @@ from typing import Any, Dict
 
 import redis
 from celery import Celery
+from celery.exceptions import SoftTimeLimitExceeded
 from celery.signals import worker_process_init
 
 from extractor import Extractor, DEFAULT_ENGINE
 
 BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
 RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "redis://localhost:6379/1")
+
+# Nothing else bounds an OCR job (unlike the LLM services, whose Ollama read
+# timeout does), so a stuck Surya call would hold the worker forever. Raise
+# it on slow CPU-only hosts, where handwritten pages take minutes each.
+OCR_TASK_TIME_LIMIT_SECONDS = int(os.environ.get("OCR_TASK_TIME_LIMIT_SECONDS", "600"))
 
 celery_app = Celery("ocr", broker=BROKER_URL, backend=RESULT_BACKEND)
 celery_app.conf.update(
@@ -92,7 +98,18 @@ def _start_background_threads(**_kwargs: Any) -> None:
     threading.Thread(target=_warm_up, name="ocr-warm-up", daemon=True).start()
 
 
-@celery_app.task(name="ocr.extract")
+# soft_time_limit raises SoftTimeLimitExceeded inside the task so cleanup can
+# run — but only once Python regains control, and a blocked Surya call
+# usually doesn't give it back. In testing it was time_limit (30s later) that
+# actually stopped the job, by killing the worker process; Celery then starts
+# a fresh one, which warms up again. Killing the worker doesn't cancel pages
+# already sent to surya-inference: it finishes them anyway, so the next few
+# jobs run slower until it catches up.
+@celery_app.task(
+    name="ocr.extract",
+    soft_time_limit=OCR_TASK_TIME_LIMIT_SECONDS,
+    time_limit=OCR_TASK_TIME_LIMIT_SECONDS + 30,
+)
 def extract_task(file_path: str, filename: str, file_extension: str) -> Dict[str, Any]:
     """Run OCR on a file api.py saved to disk, then delete the file.
 
@@ -103,21 +120,23 @@ def extract_task(file_path: str, filename: str, file_extension: str) -> Dict[str
     try:
         with _engine_lock:
             result = extractor.process_document(file_path)
-
-        return {
-            "filename": filename,
-            "file_type": file_extension,
-            "pages_processed": len(result.json_data.get("pages", [])),
-            "extraction": {
-                "text": result.text,
-                "html": result.html,
-            },
-            "metadata": {
-                "processing_engine": DEFAULT_ENGINE,
-            },
-        }
+    except SoftTimeLimitExceeded:
+        raise RuntimeError(f"OCR did not finish within {OCR_TASK_TIME_LIMIT_SECONDS}s") from None
     finally:
         try:
             os.unlink(file_path)
         except OSError:
             pass  # Ignore cleanup errors
+
+    return {
+        "filename": filename,
+        "file_type": file_extension,
+        "pages_processed": len(result.json_data.get("pages", [])),
+        "extraction": {
+            "text": result.text,
+            "html": result.html,
+        },
+        "metadata": {
+            "processing_engine": DEFAULT_ENGINE,
+        },
+    }

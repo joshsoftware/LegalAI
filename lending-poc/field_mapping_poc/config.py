@@ -22,18 +22,13 @@ class OllamaConfig:
     # on CPU), instead of sharing one resident instance.
     num_ctx: int = int(os.getenv("OLLAMA_NUM_CTX", "32768"))
     # READ-phase circuit breaker for a wedged Ollama, NOT a per-request SLA.
-    # Bounded from below and above:
-    #   - Must exceed a real cold load (~215s measured on CPU). Firing
-    #     mid-load makes Ollama abort it, so the next request reloads from
-    #     scratch — that cascade was the original /map incident.
-    #   - Must not run too far past the gateway's own proxy timeout.
-    #     Once that fires nobody is waiting for the answer, but this call
-    #     still holds _map_lock, blocking every other /map caller.
-    # Raise it (env) for slower hosts or larger models, where a legitimate
-    # load could otherwise cross it.
-    # TEMP(slow-host testing): raised from 600s to 1800s, matching the
-    # gateway's raised proxy timeout. Revert before merging.
-    request_timeout: int = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "1800"))
+    # It's also the effective time limit of a field-mapping task (see
+    # tasks.py), since the worker is otherwise only waiting on Ollama.
+    # Must exceed a real cold load (~215s measured on CPU): firing mid-load
+    # makes Ollama abort it, so the next request reloads from scratch — that
+    # cascade was the original /map incident. Raise it (env) for slower hosts
+    # or larger models, where a legitimate load could otherwise cross it.
+    request_timeout: int = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "600"))
     max_retries: int = int(os.getenv("OLLAMA_MAX_RETRIES", "2"))
 
 

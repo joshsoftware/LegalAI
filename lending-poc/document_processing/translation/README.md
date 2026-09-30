@@ -432,6 +432,19 @@ uvicorn api_server:app --host 0.0.0.0 --port 8001 --workers 1
 
 > Keep `--workers 1`. The Ollama model handles one request at a time. For concurrency, run multiple service instances behind a load balancer.
 
+`POST /translate/text` doesn't translate inside the request: it queues a job
+in Redis and a Celery worker (`tasks.py`) runs it. Start the worker alongside
+the server (both need Redis — `CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND`,
+default `redis://localhost:6379/0` and `/1`):
+
+```bash
+celery -A tasks worker -Q translation --concurrency=1 -n translation@%h
+```
+
+The worker has no auto-reload — restart it after changing `tasks.py` or the
+translator. Each Ollama call is bounded by `OLLAMA_TIMEOUT_SECONDS`
+(default 600); raise it for long documents on slow hosts.
+
 The interactive docs are available at `http://localhost:8001/docs` once the server is running.
 
 ### Endpoints
@@ -439,7 +452,7 @@ The interactive docs are available at `http://localhost:8001/docs` once the serv
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/health` | Model reachability + current config |
-| `POST` | `/translate/text` | Translate a plain-text string (JSON body) |
+| `POST` | `/translate/text` | Queue translation of a plain-text string (JSON body); returns a `task_id` |
 | `POST` | `/translate/files` | Translate one or more uploaded `.txt` files |
 
 ---
@@ -463,13 +476,21 @@ curl http://localhost:8001/health
 
 #### `POST /translate/text`
 
-Accepts a JSON body with a `text` field.
+Accepts a JSON body with a `text` field and replies straight away with
+`202` and a task id.
 
 ```bash
 curl -X POST http://localhost:8001/translate/text \
   -H "Content-Type: application/json" \
   -d '{"text": "न्यायालयाने आरोपीला दोषी ठरवले आणि तीन वर्षांच्या तुरुंगवासाची शिक्षा सुनावली."}'
 ```
+
+```json
+{"task_id": "29581377-...", "status": "PENDING"}
+```
+
+Poll the gateway's `GET /tasks/{task_id}` (e.g. `curl http://localhost:8080/tasks/29581377-...`)
+until `status` is `SUCCESS` or `FAILURE`. On success, its `result` is:
 
 ```json
 {
@@ -485,7 +506,7 @@ curl -X POST http://localhost:8001/translate/text \
 
 #### `POST /translate/files`
 
-Accepts one or more `.txt` file uploads. Returns a result per file. A failure on one file does not abort the others.
+Accepts one or more `.txt` file uploads. Returns a result per file. A failure on one file does not abort the others. Unlike `/translate/text`, this endpoint still translates inside the request (it isn't queued).
 
 ```bash
 curl -X POST http://localhost:8001/translate/files \

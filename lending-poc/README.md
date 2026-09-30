@@ -91,7 +91,7 @@ Only two ports are published to the host:
 | Gateway | http://localhost:8080 | Single public entrypoint — fronts app/OCR/translation/field-mapping. `GET /health` aggregates all four. |
 
 Everything else — `app` (8000), `translation` (8001), `field_mapping` (8002),
-`ocr` (8010), Postgres (5432), Ollama (11434) and Surya inference (8000) — is
+`ocr` (8010), Postgres (5432), Redis (6379), Ollama (11434) and Surya inference (8000) — is
 reachable only on the Docker network or on the `backend` container's own
 loopback, not from the host. The gateway proxies every route the four backend
 services define, so the frontend and any external caller has a complete path
@@ -119,24 +119,49 @@ single `backend` container (see below).
 
 ### Inside the backend container
 
-`backend` (and its GPU twin `backend-gpu`) runs five independent
-processes rather than one — `scripts/start-combined.sh` starts each with
-its own `uvicorn` command, on its own port, exactly as it would run
-standalone:
+`backend` (and its GPU twin `backend-gpu`) runs eight independent
+processes rather than one — `scripts/start-combined.sh` starts five APIs,
+each with its own `uvicorn` command on its own port, plus three Celery
+workers:
 
 | Process | Port | Role |
 |---|---|---|
 | `app` | 8000 | Case submission and decisioning (`/cases`) |
-| `translation` | 8001 | OCR-text translation |
-| `field_mapping` | 8002 | Maps OCR text onto a target JSON schema |
-| `ocr` | 8010 | Document text extraction (calls `surya-inference`) |
-| `gateway` | 8080 | Reverse-proxies to the other four on one public port |
+| `translation` | 8001 | OCR-text translation (queues `/translate/text` jobs) |
+| `field_mapping` | 8002 | Maps OCR text onto a target JSON schema (queues `/map` jobs) |
+| `ocr` | 8010 | Document text extraction (queues `/extract` jobs) |
+| `gateway` | 8080 | Reverse-proxies to the other four on one public port; serves `GET /tasks/{task_id}` |
+| `ocr@…` worker | — | Runs OCR jobs (calls `surya-inference`) |
+| `translation@…` worker | — | Runs translation jobs (calls Ollama) |
+| `field_mapping@…` worker | — | Runs field-mapping jobs (calls Ollama) |
 
-None of the five services' own code is aware they share a container —
-each is the same FastAPI app it would be if it ran alone, just co-located
-for fewer containers to manage. `docker compose logs -f backend` shows
-all five processes' output interleaved, prefixed the same way regardless
-of which one logged it.
+None of the services' own code is aware they share a container — each is
+the same FastAPI app or worker it would be if it ran alone, just co-located
+for fewer containers to manage. `docker compose logs -f backend` shows all
+processes' output interleaved.
+
+### Background jobs (OCR, translation, field mapping)
+
+These three steps can take minutes, so their APIs don't do the work inside
+the HTTP request. `POST /extract`, `POST /translate/text` and `POST /map`
+validate the input, queue a job in Redis and reply straight away with
+`202 {"task_id": ...}`. A Celery worker (one per service, one job at a
+time) runs the job and stores its result in Redis. Clients poll the
+gateway until it's done:
+
+```bash
+curl -F "file=@document_processing/ocr/extraction_input/test-image.jpg" http://localhost:8080/extract
+# → {"task_id": "f69eda69-...", "status": "PENDING"}
+
+curl http://localhost:8080/tasks/f69eda69-...
+# → {"status": "PENDING"}   waiting in the queue
+# → {"status": "STARTED"}   a worker is on it
+# → {"status": "SUCCESS", "result": {...}}  or  {"status": "FAILURE", "error": "..."}
+```
+
+The result is the same JSON each endpoint used to return directly. Celery
+workers don't auto-reload: after changing a worker's code (`tasks.py`, the
+extractor, the translator or mapper), run `docker compose restart backend`.
 
 ## Using a GPU
 

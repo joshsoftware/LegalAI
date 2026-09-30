@@ -7,11 +7,8 @@ import { taskSubmitResponseSchema } from '@/schemas/task.schema'
 // a background worker), so this just needs to cover a max-size (50MB) upload.
 const UPLOAD_TIMEOUT_MS = 2 * 60 * 1000
 
-// How long OCR may run once a worker has started on this document.
-// CPU-only Surya can take several minutes per handwritten page. Unlike the
-// old single-request timeout, time spent queued behind other documents in
-// the batch doesn't count against this.
-// TEMP(slow-host testing): raised from 5min to 30min. Revert before merging.
+// Safety net only: the OCR worker enforces the real limit
+// (OCR_TASK_TIME_LIMIT_SECONDS). This catches a worker that dies mid-task.
 const EXTRACT_MAX_PROCESSING_MS = 30 * 60 * 1000
 
 /**

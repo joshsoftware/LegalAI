@@ -2,9 +2,10 @@ import axios from 'axios'
 import { env } from '@/config/env'
 import { toAppError } from '@/lib/errors'
 
-// TEMP(slow-host testing): default raised from 30s to 30min so nothing gives
-// up early while testing on a slow machine. Revert before merging.
-const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000
+// Slow work (OCR, translation, field mapping) runs in background workers and
+// is polled, and the remaining slow calls set their own timeout, so this
+// only covers quick requests.
+const DEFAULT_TIMEOUT_MS = 30 * 1000
 
 export const apiClient = axios.create({
   baseURL: env.VITE_API_BASE_URL,
