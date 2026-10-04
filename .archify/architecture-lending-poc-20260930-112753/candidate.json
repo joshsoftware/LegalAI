@@ -1,0 +1,166 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "lending-poc System Architecture",
+    "output": ".archify/architecture-lending-poc-20260930-112753/lending-poc.html",
+    "quality_profile": "showcase",
+    "locale": "en",
+    "repository": {
+      "url": "https://github.com/joshsoftware/LegalAI",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "32af988d91c0d22f27d7fd5ad3de2a925f6c7a5a"
+    }
+  },
+  "components": [
+    {
+      "id": "user", "type": "external", "label": "User", "sublabel": "uploads KYC docs",
+      "pos": [40, 410], "size": [130, 62],
+      "sources": [{ "path": "lending-poc/frontend/src/routes/index.tsx", "line": 12, "end_line": 32, "label": "upload→validation steps" }]
+    },
+    {
+      "id": "frontend", "type": "frontend", "label": "React SPA", "sublabel": "Vite :5173 · axios + zod",
+      "pos": [310, 406], "size": [160, 70],
+      "sources": [
+        { "path": "lending-poc/frontend/src/api/client.ts", "line": 9, "end_line": 15, "label": "axios → gateway" },
+        { "path": "lending-poc/frontend/src/store/useAppStore.ts", "line": 93, "label": "in-memory zustand store" },
+        { "path": "lending-poc/docker-compose.yml", "line": 196, "end_line": 202 }
+      ]
+    },
+    {
+      "id": "gateway", "type": "backend", "label": "API Gateway", "sublabel": "FastAPI :8080 · CORS * · no auth",
+      "pos": [580, 396], "size": [180, 90], "tag": "only published API port",
+      "sources": [
+        { "path": "lending-poc/gateway/main.py", "line": 66, "end_line": 74, "label": "CORS allow_origins=*" },
+        { "path": "lending-poc/gateway/main.py", "line": 105, "end_line": 127, "label": "proxy routes" },
+        { "path": "lending-poc/docker-compose.yml", "line": 121, "end_line": 122, "label": "8080 published" }
+      ]
+    },
+    {
+      "id": "ocr", "type": "backend", "label": "OCR API", "sublabel": ":8010 · 50 MB cap · 1 job at a time",
+      "pos": [930, 200], "size": [200, 62],
+      "sources": [
+        { "path": "lending-poc/document_processing/ocr/api.py", "line": 90, "end_line": 146, "label": "POST /extract" },
+        { "path": "lending-poc/scripts/start-combined.sh", "line": 31 }
+      ]
+    },
+    {
+      "id": "translation", "type": "backend", "label": "Translation API", "sublabel": ":8001 · banking KB (jsonl)",
+      "pos": [930, 330], "size": [200, 62],
+      "sources": [
+        { "path": "lending-poc/document_processing/translation/api/routes.py", "line": 35, "end_line": 39, "label": "serialized LLM calls" },
+        { "path": "lending-poc/document_processing/translation/translation_service/config.py", "line": 33, "end_line": 42, "label": "KB file per domain" },
+        { "path": "lending-poc/document_processing/translation/translation_service/kb/loader.py", "line": 12, "end_line": 28 }
+      ]
+    },
+    {
+      "id": "mapping", "type": "backend", "label": "Field-Mapping API", "sublabel": ":8002 · text → JSON schema",
+      "pos": [930, 460], "size": [200, 62],
+      "sources": [
+        { "path": "lending-poc/field_mapping_poc/api.py", "line": 101, "end_line": 145, "label": "POST /map" },
+        { "path": "lending-poc/field_mapping_poc/core/ollama_client.py", "line": 70, "end_line": 78 }
+      ]
+    },
+    {
+      "id": "app", "type": "backend", "label": "Cases API", "sublabel": ":8000 · validate → score → decide",
+      "pos": [930, 620], "size": [200, 62],
+      "sources": [
+        { "path": "lending-poc/app/api/cases.py", "line": 38, "end_line": 51, "label": "POST /cases" },
+        { "path": "lending-poc/app/services/pipeline.py", "line": 11, "end_line": 56, "label": "pipeline stages" }
+      ]
+    },
+    {
+      "id": "surya", "type": "backend", "label": "surya-inference", "sublabel": "llama.cpp server · cpu/gpu",
+      "pos": [1290, 200], "size": [180, 62],
+      "sources": [
+        { "path": "lending-poc/docker-compose.yml", "line": 81, "end_line": 89 },
+        { "path": "lending-poc/docker-compose.yml", "line": 130, "label": "SURYA_INFERENCE_URL" },
+        { "path": "lending-poc/document_processing/ocr/extractor/engines/surya_engine.py", "line": 35, "end_line": 52 }
+      ]
+    },
+    {
+      "id": "ollama", "type": "external", "label": "Ollama", "sublabel": "local LLM · gemma4",
+      "pos": [1290, 395], "size": [180, 62],
+      "sources": [
+        { "path": "lending-poc/docker-compose.yml", "line": 52, "end_line": 60 },
+        { "path": "lending-poc/docker-compose.yml", "line": 127, "end_line": 128, "label": "OLLAMA_HOST / model" }
+      ]
+    },
+    {
+      "id": "postgres", "type": "database", "label": "PostgreSQL 16", "sublabel": "Aadhaar/PAN Fernet-encrypted",
+      "pos": [1290, 620], "size": [180, 62],
+      "sources": [
+        { "path": "lending-poc/docker-compose.yml", "line": 13, "end_line": 28 },
+        { "path": "lending-poc/db/models/golden_record.py", "line": 21, "end_line": 22, "label": "EncryptedString cols" },
+        { "path": "lending-poc/db/models/types.py", "line": 8, "end_line": 27, "label": "Fernet" }
+      ]
+    },
+    {
+      "id": "redis", "type": "messagebus", "label": "Redis 7", "sublabel": "Celery broker · not wired yet",
+      "pos": [590, 620], "size": [160, 62], "tag": "WIP",
+      "sources": [
+        { "path": "lending-poc/docker-compose.yml", "line": 30, "end_line": 46 },
+        { "path": "lending-poc/docker-compose.yml", "line": 135, "end_line": 136, "label": "broker db0 / results db1" }
+      ]
+    },
+    {
+      "id": "hf", "type": "cloud", "label": "HuggingFace Hub", "sublabel": "public internet",
+      "pos": [940, 40], "size": [180, 62],
+      "sources": [{ "path": "lending-poc/docker-compose.yml", "line": 145, "end_line": 151, "label": "OCR weights cache" }]
+    }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "User's browser (untrusted client)", "wraps": ["frontend"], "pad": 20 },
+    { "kind": "region", "label": "Docker Compose network (host machine)", "wraps": ["gateway", "redis", "ocr", "translation", "mapping", "app", "surya", "ollama", "postgres"], "pad": 28 },
+    { "kind": "security-group", "label": "backend container · 127.0.0.1 only", "wraps": ["ocr", "translation", "mapping", "app"], "pad": 14 }
+  ],
+  "connections": [
+    { "id": "c_user", "from": "user", "to": "frontend", "label": "uses", "variant": "emphasis" },
+    { "id": "c_gw", "from": "frontend", "to": "gateway", "label": "HTTP :8080", "variant": "emphasis" },
+    { "id": "c_ocr", "from": "gateway", "to": "ocr", "label": "POST /extract" },
+    { "id": "c_tr", "from": "gateway", "to": "translation", "label": "POST /translate/text" },
+    { "id": "c_map", "from": "gateway", "to": "mapping", "label": "POST /map" },
+    { "id": "c_case", "from": "gateway", "to": "app", "label": "POST /cases" },
+    { "id": "c_surya", "from": "ocr", "to": "surya", "label": "HTTP /v1" },
+    { "id": "c_tr_llm", "from": "translation", "to": "ollama", "label": "chat" },
+    { "id": "c_map_llm", "from": "mapping", "to": "ollama", "label": "chat" },
+    { "id": "c_db", "from": "app", "to": "postgres", "label": "SQL · asyncpg" },
+    { "id": "c_hf", "from": "ocr", "to": "hf", "label": "weights (1st run)", "variant": "dashed" },
+    { "id": "c_redis", "from": "gateway", "to": "redis", "label": "planned", "variant": "dashed" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Main journey (browser drives each step)",
+      "items": [
+        "Upload → POST /extract per file → OCR text + HTML",
+        "OCR text → POST /translate/text (domain: banking)",
+        "Translated text → POST /map with a per-document schema",
+        "Mapped fields → POST /cases → PASS / FAIL / NEEDS_REVIEW",
+        "Cases API runs golden record → identity + business checks → score → decision, then saves everything in one transaction"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Trust boundaries",
+      "items": [
+        "Only :8080 (gateway) and :5173 (frontend) are published to the host",
+        "The gateway has no authentication and allows CORS from any origin",
+        "Internal services listen on 127.0.0.1 inside the backend container; Postgres, Redis and Ollama publish no host port",
+        "Aadhaar and PAN numbers are Fernet-encrypted in golden_records; PAN is masked in document JSON",
+        "Only outbound internet traffic: HuggingFace model downloads (and manual `ollama pull`)"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Caveats",
+      "items": [
+        "Diagram reflects commit 32af988; the Celery/Redis task flow on this branch is still uncommitted",
+        "OCR, translation and mapping each process one request at a time (asyncio lock)",
+        "Timeouts temporarily raised to 1800 s (marked TEMP in code)",
+        "Extraction/ (legal-case pipeline) is a separate project and is not shown"
+      ]
+    }
+  ]
+}

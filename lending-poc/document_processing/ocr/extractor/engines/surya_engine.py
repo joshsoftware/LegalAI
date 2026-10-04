@@ -10,7 +10,8 @@ needs to change.
 
 from __future__ import annotations
 
-from typing import List
+import os
+from typing import List, Optional
 
 from PIL import Image
 from surya.inference import SuryaInferenceManager
@@ -33,18 +34,49 @@ class SuryaEngine(BaseOCREngine):
         self._recognizer = None
 
     def _ensure_ready(self) -> None:
-        if self._manager is None:
-            self._manager = SuryaInferenceManager()
+        # Guard on the recognizer: it is what run() needs, and a failed start()
+        # would otherwise leave a manager behind that skips this block forever.
+        if self._recognizer is not None:
+            return
+
+        manager = SuryaInferenceManager()
+        try:
             # Surya creates its inference manager lazily.  Starting it here
             # means an API startup check can fail fast when WSL is missing its
             # backend (llama-server on CPU, or vLLM/Docker on CUDA), instead
             # of making the first uploaded document appear to hang.
-            self._manager.start()
-            self._recognizer = RecognitionPredictor(self._manager)
+            manager.start()
+            recognizer = RecognitionPredictor(manager)
+        except Exception:
+            # Don't leave a half-started backend running. A failure to clean up
+            # must not replace the error that actually caused the problem.
+            try:
+                manager.stop()
+            except Exception:
+                pass
+            raise
+
+        # Assign only once every step succeeded, so a failure leaves the engine
+        # untouched and the next call retries from scratch.
+        self._manager = manager
+        self._recognizer = recognizer
 
     def warm_up(self) -> None:
         """Start and validate Surya's inference backend without processing a file."""
         self._ensure_ready()
+
+    @property
+    def health_url(self) -> Optional[str]:
+        """Health endpoint of an externally hosted Surya, or None if there isn't one.
+
+        Surya treats an unset SURYA_INFERENCE_URL as "spawn my own backend
+        in-process", so there is no endpoint to poll in that case.
+        """
+        external_url = os.getenv("SURYA_INFERENCE_URL")
+        if not external_url:
+            return None
+        # Same /v1 -> /health mapping Surya applies to this variable internally.
+        return external_url.rstrip("/").removesuffix("/v1") + "/health"
 
     def run(self, images: List[Image.Image]) -> List[PageResult]:
         self._ensure_ready()

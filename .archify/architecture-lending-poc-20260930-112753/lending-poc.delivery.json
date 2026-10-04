@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "5e8cd7fc-be87-45ae-8ae8-ca2bee11a520",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "C:\\Users\\Ayan\\Desktop\\Project\\FinTechAI\\.archify\\architecture-lending-poc-20260930-112753\\candidate.json",
+  "output": "C:\\Users\\Ayan\\Desktop\\Project\\FinTechAI\\.archify\\architecture-lending-poc-20260930-112753\\lending-poc.html",
+  "specification": {
+    "sha256": "f6accc97fe7e183ec1ed223d40a2e0aa4208c5fa9fbc2b673a2295ea3b8addfd",
+    "bytes": 8845
+  },
+  "artifact": {
+    "sha256": "81c5009d1e2d8fe2c9d7f01d4db0a4f9d2ae21a7f891ee5c43613dffd386ed8d",
+    "bytes": 780329
+  }
+}

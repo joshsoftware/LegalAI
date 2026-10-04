@@ -1,0 +1,189 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "lending-poc System Architecture",
+    "output": ".archify/architecture-lending-poc-20260930-150929/lending-poc.html",
+    "quality_profile": "showcase",
+    "locale": "en",
+    "repository": {
+      "url": "https://github.com/joshsoftware/LegalAI",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "23a61310e2e391e53c625ae113aab884fef641e9"
+    }
+  },
+  "components": [
+    {
+      "id": "user", "type": "external", "label": "User", "sublabel": "uploads KYC docs",
+      "pos": [40, 550], "size": [130, 62],
+      "sources": [{ "path": "lending-poc/frontend/src/routes/index.tsx", "line": 12, "end_line": 32, "label": "upload→validation steps" }]
+    },
+    {
+      "id": "frontend", "type": "frontend", "label": "React SPA", "sublabel": "Vite :5173 · polls OCR tasks",
+      "pos": [230, 546], "size": [170, 70],
+      "sources": [
+        { "path": "lending-poc/frontend/src/api/client.ts", "line": 9, "end_line": 15, "label": "axios → gateway" },
+        { "path": "lending-poc/frontend/src/api/extract.ts", "line": 23, "end_line": 35, "label": "upload, then poll" },
+        { "path": "lending-poc/frontend/src/api/tasks.ts", "line": 42, "end_line": 73, "label": "pollTask every 2 s" }
+      ]
+    },
+    {
+      "id": "gateway", "type": "backend", "label": "API Gateway", "sublabel": "FastAPI :8080 · CORS * · no auth",
+      "pos": [490, 536], "size": [180, 90], "tag": "only published API port",
+      "sources": [
+        { "path": "lending-poc/gateway/main.py", "line": 74, "end_line": 82, "label": "CORS allow_origins=*" },
+        { "path": "lending-poc/gateway/main.py", "line": 113, "end_line": 135, "label": "proxy routes" },
+        { "path": "lending-poc/gateway/main.py", "line": 141, "end_line": 158, "label": "GET /tasks/{id}" }
+      ]
+    },
+    {
+      "id": "redis", "type": "messagebus", "label": "Redis 7", "sublabel": "queue db0 · results db1",
+      "pos": [830, 190], "size": [200, 62],
+      "sources": [
+        { "path": "lending-poc/docker-compose.yml", "line": 30, "end_line": 46 },
+        { "path": "lending-poc/docker-compose.yml", "line": 135, "end_line": 136, "label": "broker db0 / results db1" }
+      ]
+    },
+    {
+      "id": "worker", "type": "backend", "label": "OCR Celery Worker", "sublabel": "concurrency 1 · runs Surya",
+      "pos": [1140, 190], "size": [190, 62],
+      "sources": [
+        { "path": "lending-poc/document_processing/ocr/tasks.py", "line": 95, "end_line": 123, "label": "ocr.extract task" },
+        { "path": "lending-poc/document_processing/ocr/tasks.py", "line": 64, "end_line": 71, "label": "heartbeat to Redis" },
+        { "path": "lending-poc/scripts/start-combined.sh", "line": 38, "label": "worker process" }
+      ]
+    },
+    {
+      "id": "ocr", "type": "backend", "label": "OCR API", "sublabel": ":8010 · checks + queues upload",
+      "pos": [830, 340], "size": [200, 62],
+      "sources": [
+        { "path": "lending-poc/document_processing/ocr/api.py", "line": 83, "end_line": 141, "label": "POST /extract → 202" },
+        { "path": "lending-poc/document_processing/ocr/api.py", "line": 45, "end_line": 50, "label": "shared upload dir" }
+      ]
+    },
+    {
+      "id": "translation", "type": "backend", "label": "Translation API", "sublabel": ":8001 · banking KB (jsonl)",
+      "pos": [830, 470], "size": [200, 62],
+      "sources": [
+        { "path": "lending-poc/document_processing/translation/api/routes.py", "line": 35, "end_line": 39, "label": "serialized LLM calls" },
+        { "path": "lending-poc/document_processing/translation/translation_service/config.py", "line": 33, "end_line": 42, "label": "KB file per domain" },
+        { "path": "lending-poc/document_processing/translation/translation_service/kb/loader.py", "line": 12, "end_line": 28 }
+      ]
+    },
+    {
+      "id": "mapping", "type": "backend", "label": "Field-Mapping API", "sublabel": ":8002 · text → JSON schema",
+      "pos": [830, 600], "size": [200, 62],
+      "sources": [
+        { "path": "lending-poc/field_mapping_poc/api.py", "line": 101, "end_line": 145, "label": "POST /map" },
+        { "path": "lending-poc/field_mapping_poc/core/ollama_client.py", "line": 70, "end_line": 78 }
+      ]
+    },
+    {
+      "id": "app", "type": "backend", "label": "Cases API", "sublabel": ":8000 · validate → score → decide",
+      "pos": [830, 760], "size": [200, 62],
+      "sources": [
+        { "path": "lending-poc/app/api/cases.py", "line": 38, "end_line": 51, "label": "POST /cases" },
+        { "path": "lending-poc/app/services/pipeline.py", "line": 11, "end_line": 56, "label": "pipeline stages" }
+      ]
+    },
+    {
+      "id": "surya", "type": "backend", "label": "surya-inference", "sublabel": "llama.cpp server · cpu/gpu",
+      "pos": [1420, 190], "size": [180, 62],
+      "sources": [
+        { "path": "lending-poc/docker-compose.yml", "line": 81, "end_line": 89 },
+        { "path": "lending-poc/docker-compose.yml", "line": 130, "label": "SURYA_INFERENCE_URL" },
+        { "path": "lending-poc/document_processing/ocr/extractor/engines/surya_engine.py", "line": 35, "end_line": 52 }
+      ]
+    },
+    {
+      "id": "ollama", "type": "external", "label": "Ollama", "sublabel": "local LLM · gemma4",
+      "pos": [1140, 535], "size": [190, 62],
+      "sources": [
+        { "path": "lending-poc/docker-compose.yml", "line": 52, "end_line": 60 },
+        { "path": "lending-poc/docker-compose.yml", "line": 127, "end_line": 128, "label": "OLLAMA_HOST / model" }
+      ]
+    },
+    {
+      "id": "postgres", "type": "database", "label": "PostgreSQL 16", "sublabel": "Aadhaar/PAN Fernet-encrypted",
+      "pos": [1140, 760], "size": [190, 62],
+      "sources": [
+        { "path": "lending-poc/docker-compose.yml", "line": 13, "end_line": 28 },
+        { "path": "lending-poc/db/models/golden_record.py", "line": 21, "end_line": 22, "label": "EncryptedString cols" },
+        { "path": "lending-poc/db/models/types.py", "line": 8, "end_line": 27, "label": "Fernet" }
+      ]
+    },
+    {
+      "id": "hf", "type": "cloud", "label": "HuggingFace Hub", "sublabel": "public internet",
+      "pos": [1145, 30], "size": [180, 62],
+      "sources": [{ "path": "lending-poc/docker-compose.yml", "line": 145, "end_line": 151, "label": "OCR weights cache" }]
+    }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "User's browser (untrusted client)", "wraps": ["frontend"], "pad": 20 },
+    { "kind": "region", "label": "Docker Compose network (host machine)", "wraps": ["gateway", "redis", "worker", "ocr", "translation", "mapping", "app", "surya", "ollama", "postgres"], "pad": 28 },
+    { "kind": "security-group", "label": "internal HTTP services · 127.0.0.1 only", "wraps": ["ocr", "translation", "mapping", "app"], "pad": 14 }
+  ],
+  "connections": [
+    { "id": "c_user", "from": "user", "to": "frontend", "label": "uses", "variant": "emphasis" },
+    { "id": "c_gw", "from": "frontend", "to": "gateway", "label": "HTTP :8080", "variant": "emphasis" },
+    { "id": "c_ocr", "from": "gateway", "to": "ocr", "label": "POST /extract" },
+    { "id": "c_tr", "from": "gateway", "to": "translation", "label": "POST /translate/text" },
+    { "id": "c_map", "from": "gateway", "to": "mapping", "label": "POST /map" },
+    { "id": "c_case", "from": "gateway", "to": "app", "label": "POST /cases" },
+    { "id": "c_status", "from": "gateway", "to": "redis", "label": "read task result", "fromSide": "top", "toSide": "left" },
+    { "id": "c_enqueue", "from": "ocr", "to": "redis", "label": "enqueue", "variant": "dashed", "fromSide": "top", "toSide": "bottom" },
+    { "id": "c_worker", "from": "worker", "to": "redis", "label": "task / result", "variant": "dashed" },
+    { "id": "c_surya", "from": "worker", "to": "surya", "label": "HTTP /v1" },
+    { "id": "c_hf", "from": "worker", "to": "hf", "label": "weights (1st run)", "variant": "dashed", "fromSide": "top", "toSide": "bottom" },
+    { "id": "c_tr_llm", "from": "translation", "to": "ollama", "label": "chat" },
+    { "id": "c_map_llm", "from": "mapping", "to": "ollama", "label": "chat" },
+    { "id": "c_db", "from": "app", "to": "postgres", "label": "SQL · asyncpg" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Main journey (browser drives each step)",
+      "items": [
+        "Upload → POST /extract per file → 202 with a task_id",
+        "Browser polls GET /tasks/{id} every 2 s until SUCCESS or FAILURE",
+        "OCR text → POST /translate/text (domain: banking)",
+        "Translated text → POST /map with a per-document schema",
+        "Mapped fields → POST /cases → PASS / FAIL / NEEDS_REVIEW, saved in one transaction"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Async OCR (Celery)",
+      "items": [
+        "OCR API saves the upload to a temp dir and queues only the file path, not the bytes",
+        "One worker (concurrency 1) takes tasks from Redis, runs Surya, and stores the result in Redis",
+        "The gateway only reads results; it never queues or runs tasks",
+        "The worker writes a heartbeat key every 10 s; OCR /health reads it and refuses uploads if it is missing",
+        "Translation, field mapping and cases are still plain request/response"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Trust boundaries",
+      "items": [
+        "Only :8080 (gateway) and :5173 (frontend) are published to the host",
+        "The gateway has no authentication and allows CORS from any origin",
+        "Anyone who knows a task_id can read that OCR result via GET /tasks/{id}",
+        "Internal services use 127.0.0.1; Postgres, Redis and Ollama publish no host port",
+        "Aadhaar and PAN numbers are Fernet-encrypted in golden_records; OCR text in Redis is not encrypted",
+        "Only outbound internet traffic: HuggingFace model downloads (and manual `ollama pull`)"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Caveats",
+      "items": [
+        "Diagram reflects commit 23a6131",
+        "Translation and mapping each process one request at a time (asyncio lock)",
+        "Timeouts temporarily raised to 1800 s (marked TEMP in code)",
+        "Extraction/ (legal-case pipeline) is a separate project and is not shown"
+      ]
+    }
+  ]
+}
