@@ -1,7 +1,8 @@
 import { z } from 'zod'
 
 /**
- * Response shape for POST /extract (one file per request).
+ * Result of one OCR job: what GET /tasks/{task_id} returns as `result` once
+ * a POST /extract upload (one file per request) finishes processing.
  * NOTE: extraction.html is currently commented out on the backend and not
  * returned — keep it optional so the UI can fall back gracefully.
  */

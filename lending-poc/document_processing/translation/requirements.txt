@@ -5,3 +5,6 @@ ollama==0.6.2
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
 python-multipart==0.0.20
+
+# Background task queue (translation runs in a Celery worker, brokered via Redis)
+celery[redis]>=5.6,<6

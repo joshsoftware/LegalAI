@@ -1,3 +1,6 @@
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
 httpx>=0.27,<1.0
+# Only used to read task status/results from the Celery result backend
+# (GET /tasks/{id}) — the gateway never runs tasks itself.
+celery[redis]>=5.6,<6

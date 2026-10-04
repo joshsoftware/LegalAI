@@ -47,9 +47,17 @@ class TranslationResult(BaseModel):
 
 
 class TextTranslateResponse(BaseModel):
-    """Response for POST /translate/text."""
+    """Result of a POST /translate/text task, returned by the gateway's
+    GET /tasks/{task_id} once the translation finishes."""
 
     result: TranslationResult
+
+
+class TaskSubmittedResponse(BaseModel):
+    """Response for POST /translate/text — the translation runs in a background worker."""
+
+    task_id: str = Field(description="Poll GET /tasks/{task_id} on the gateway for the result.")
+    status: str = Field(description="Always 'PENDING' when first queued.")
 
 
 class FilesTranslateResponse(BaseModel):

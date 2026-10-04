@@ -1,214 +1,147 @@
 #!/usr/bin/env python3
 """FastAPI web service for OCR text extraction.
 
-Provides REST API endpoints for uploading and processing documents (PDF, PNG, JPEG).
-Built as a thin wrapper around the existing Extractor pipeline.
+Accepts document uploads (PDF, PNG, JPEG) and queues them for OCR. The OCR
+itself runs in a separate Celery worker (see tasks.py), so this service
+replies straight away with a task id instead of holding the request open for
+the minutes a document can take. Clients poll the gateway's
+GET /tasks/{task_id} for the result.
 
 Usage:
     uvicorn api:app --host 0.0.0.0 --port 8010 --reload
+    celery -A tasks worker -Q ocr --concurrency=1 -n ocr@%h   (the worker)
 
 Endpoints:
-    POST /extract - Upload and process a document
-    GET /health   - Health check endpoint
+    POST /extract - Validate and queue a document; returns 202 + task_id
+    GET /health   - Health check, reflecting the OCR worker's status
 """
 
-import asyncio
+import json
+import os
 import tempfile
 from pathlib import Path
 from typing import Any, Dict
-import os
-from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.concurrency import run_in_threadpool
+import redis.asyncio as aioredis
+from redis.exceptions import RedisError
 import uvicorn
 
-from extractor import Extractor, DEFAULT_ENGINE
+from extractor import DEFAULT_ENGINE
 from extractor.loader import SUPPORTED_EXTENSIONS
-
-# Initialize extractor (reused across requests for efficiency)
-extractor = Extractor(engine=DEFAULT_ENGINE)
-
-LIVENESS_PROBE_INTERVAL_SECONDS = float(os.getenv("SURYA_LIVENESS_PROBE_INTERVAL_SECONDS", "10"))
-LIVENESS_PROBE_TIMEOUT_SECONDS = float(os.getenv("SURYA_LIVENESS_PROBE_TIMEOUT_SECONDS", "5"))
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Start Surya without making the HTTP service unavailable during warm-up."""
-    app.state.ocr_ready = False
-    app.state.ocr_error = None
-
-    async def monitor_readiness() -> None:
-        """Run Surya's one-time startup check, then keep polling its liveness.
-        """
-        warmed_up = False
-        try:
-            await run_in_threadpool(extractor.engine.warm_up)
-        except Exception as exc:
-
-            app.state.ocr_error = str(exc)
-        else:
-            warmed_up = True
-            app.state.ocr_ready = True
-
-        # Only an externally hosted Surya exposes a health endpoint; otherwise
-        # it runs in-process and the warm-up result above is all we can check.
-        health_url = extractor.engine.health_url
-        if health_url is None:
-            return
-
-        while True:
-            await asyncio.sleep(LIVENESS_PROBE_INTERVAL_SECONDS)
-            try:
-                async with httpx.AsyncClient(timeout=LIVENESS_PROBE_TIMEOUT_SECONDS) as client:
-                    response = await client.get(health_url)
-                    response.raise_for_status()
-            except Exception as exc:
-                app.state.ocr_ready = False
-                app.state.ocr_error = str(exc)
-                continue
-
-            # A reachable server is not enough - the local Surya client must
-            # have initialized too, or /extract would accept work it cannot do.
-            # Retry here so a server that came up late recovers without a restart.
-            if not warmed_up:
-                try:
-                    await run_in_threadpool(extractor.engine.warm_up)
-                except Exception as exc:
-                    app.state.ocr_ready = False
-                    app.state.ocr_error = str(exc)
-                    continue
-                warmed_up = True
-
-            app.state.ocr_ready = True
-            app.state.ocr_error = None
-
-    monitor_task = asyncio.create_task(monitor_readiness())
-    try:
-        yield
-    finally:
-        monitor_task.cancel()
-        try:
-            await monitor_task
-        except asyncio.CancelledError:
-            pass
-
+from tasks import RESULT_BACKEND, WORKER_STATUS_KEY, extract_task
 
 # Initialize FastAPI app
 app = FastAPI(
     title="OCR Text Extraction API",
     description="Upload documents (PDF, PNG, JPEG) for OCR text extraction using Surya",
     version="1.0.0",
-    lifespan=lifespan,
 )
 
 # File size limit
 MAX_FILE_SIZE = int(os.getenv("MAX_UPLOAD_FILE_SIZE_MB", "50")) * 1024 * 1024
 
 
-_extract_lock = asyncio.Lock()
+# Uploads reach the worker as a file path, so this directory must be visible
+# to both processes. They share a container today; if the worker ever moves
+# to its own container, this has to become a shared volume. Deliberately not
+# under /app, which docker-compose bind-mounts from the host's repo checkout.
+UPLOAD_DIR = Path(os.environ.get("OCR_UPLOAD_DIR", Path(tempfile.gettempdir()) / "ocr-uploads"))
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+# Reads the heartbeat the worker writes to Redis (see tasks.py).
+_redis = aioredis.Redis.from_url(RESULT_BACKEND)
+
+
+async def _worker_status() -> Dict[str, Any]:
+    """The OCR worker's last reported status ("initializing", "healthy" or
+    "unhealthy"), or "unreachable" if its heartbeat has expired."""
+    try:
+        raw = await _redis.get(WORKER_STATUS_KEY)
+    except RedisError as exc:
+        return {"status": "unreachable", "error": f"Cannot reach Redis: {exc}"}
+    if raw is None:
+        return {"status": "unreachable", "error": "No OCR worker is running (no heartbeat received)."}
+    return json.loads(raw)
+
 
 @app.get("/health")
 async def health_check() -> Dict[str, Any]:
-    """Health check that distinguishes an online API from ready OCR inference."""
+    """Health check that distinguishes an online API from a ready OCR worker."""
+    worker = await _worker_status()
     response: Dict[str, Any] = {
-        "status": "healthy" if app.state.ocr_ready else "initializing",
+        "status": worker["status"],
         "service": "OCR Text Extraction API",
         "engine": DEFAULT_ENGINE,
-        "ocr_ready": app.state.ocr_ready,
+        "ocr_ready": worker["status"] == "healthy",
     }
-    if app.state.ocr_error:
-        response["status"] = "unhealthy"
-        response["ocr_error"] = app.state.ocr_error
+    if worker.get("error"):
+        response["ocr_error"] = worker["error"]
     return response
 
-@app.post("/extract")
+
+@app.post("/extract", status_code=202)
 async def extract_text(file: UploadFile = File(...)) -> Dict[str, Any]:
     """
-    Extract text from an uploaded document.
-    
+    Queue an uploaded document for OCR text extraction.
+
     Accepts: PDF, PNG, JPEG files
-    Returns: Extracted text, HTML representation, and metadata
+    Returns: 202 with a task_id; poll GET /tasks/{task_id} (on the gateway)
+    for the extracted text, HTML representation, and metadata.
     """
-    
-    # Never accept an upload when the OCR runtime is not available.  Without
-    # this guard Surya can block the request for its full backend timeout.
-    if not app.state.ocr_ready:
-        detail = "OCR inference is still initializing"
-        if app.state.ocr_error:
-            detail = f"OCR inference is unavailable: {app.state.ocr_error}"
-        raise HTTPException(status_code=503, detail=detail)
+
+    # Refuse uploads only when OCR can't run at all. "initializing" is fine:
+    # the task just waits in the queue until the worker's warm-up finishes.
+    worker = await _worker_status()
+    if worker["status"] in ("unhealthy", "unreachable"):
+        raise HTTPException(
+            status_code=503,
+            detail=f"OCR inference is unavailable: {worker.get('error')}",
+        )
 
     # Validate file type
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename provided")
-    
+
     file_extension = Path(file.filename).suffix.lower()
     if file_extension not in SUPPORTED_EXTENSIONS:
         supported = ", ".join(sorted(SUPPORTED_EXTENSIONS))
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail=f"Unsupported file type: {file_extension}. Supported: {supported}"
         )
-    
+
     # Check file size
     content = await file.read(MAX_FILE_SIZE + 1)
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(
-            status_code=413, 
+            status_code=413,
             detail=f"File too large. Maximum size: {MAX_FILE_SIZE // (1024*1024)}MB"
         )
-    
-    # Reset file pointer for processing
-    await file.seek(0)
-    
-    # Process the document
-    temp_file = None
-    temp_file_path = ""
+
+    # The worker deletes this file once it has processed it.
+    with tempfile.NamedTemporaryFile(dir=UPLOAD_DIR, suffix=file_extension, delete=False) as temp_file:
+        temp_file.write(content)
+        temp_file_path = temp_file.name
+
     try:
-        # Create temporary file
-        with tempfile.NamedTemporaryFile(
-            suffix=file_extension, 
-            delete=False
-        ) as temp_file:
-            temp_file.write(content)
-            temp_file_path = temp_file.name
-        
-        async with _extract_lock:
-            result = await run_in_threadpool(extractor.process_document, temp_file_path)
-        
-        # Prepare response
-        response_data = {
-            "filename": file.filename,
-            "file_type": file_extension,
-            "pages_processed": len(result.json_data.get("pages", [])),
-            "extraction": {
-                "text": result.text,
-                "html": result.html,
-                # "structured_data": result.json_data
-            },
-            "metadata": {
-                "processing_engine": DEFAULT_ENGINE
-            }
-        }
-        
-        return response_data
-        
+        # .delay() talks to Redis synchronously, so keep it off the event loop.
+        task = await run_in_threadpool(extract_task.delay, temp_file_path, file.filename, file_extension)
     except Exception as e:
+        # Nothing was queued, so no worker will ever clean this file up.
+        try:
+            os.unlink(temp_file_path)
+        except OSError:
+            pass
         raise HTTPException(
-            status_code=500, 
-            detail=f"Error processing document: {str(e)}"
+            status_code=503,
+            detail=f"Could not queue the document for OCR: {str(e)}"
         )
-    
-    finally:
-        # Clean up temporary file
-        if temp_file_path and os.path.exists(temp_file_path):
-            try:
-                os.unlink(temp_file_path)
-            except OSError:
-                pass  # Ignore cleanup errors
+
+    return {"task_id": task.id, "status": "PENDING"}
+
 
 @app.get("/")
 async def root() -> Dict[str, Any]:
@@ -218,11 +151,11 @@ async def root() -> Dict[str, Any]:
         "version": "1.0.0",
         "supported_formats": list(SUPPORTED_EXTENSIONS),
         "endpoints": {
-            "POST /extract": "Upload and process a document",
+            "POST /extract": "Queue a document for OCR; returns a task_id",
             "GET /health": "Health check",
             "GET /": "This information"
         },
-        "usage": "Upload files to /extract endpoint using multipart/form-data"
+        "usage": "Upload files to /extract using multipart/form-data, then poll GET /tasks/{task_id} on the gateway"
     }
 
 if __name__ == "__main__":

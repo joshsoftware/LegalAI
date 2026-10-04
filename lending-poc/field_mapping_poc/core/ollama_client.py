@@ -65,7 +65,8 @@ class OllamaClient:
         # connect phase too, so a silently-dropped connection would stall for
         # the full circuit-breaker window). READ carries the circuit breaker:
         # long enough to never cut a legitimate cold load, short enough that a
-        # wedged Ollama eventually releases _map_lock. See request_timeout in
+        # wedged Ollama eventually frees the field-mapping worker (which runs
+        # one task at a time). See request_timeout in
         # config.py.
         self._client = ollama.Client(
             host=host,
@@ -127,7 +128,7 @@ class OllamaClient:
             except httpx.ReadTimeout as exc:
                 # Circuit breaker tripped: we already waited the full read
                 # window. Retrying re-waits it from scratch (3 attempts =
-                # 3x the window of a held _map_lock), and the timeout just
+                # 3x the window of a blocked worker), and the timeout just
                 # made Ollama abort whatever it was loading, so the retry
                 # starts an even slower attempt. Give up now.
                 #
@@ -249,7 +250,7 @@ class OllamaClient:
             #   model answered               -> "ok"
             # Getting this wrong is not cosmetic — api.py's /map gate 503s on
             # "unreachable" only, so a status that briefly reads the wrong
-            # value either lets doomed requests pile up on _map_lock or
+            # value either lets doomed tasks pile up in the queue or
             # rejects cold-load requests that would have succeeded.
             try:
                 await asyncio.to_thread(self._probe_reachable)

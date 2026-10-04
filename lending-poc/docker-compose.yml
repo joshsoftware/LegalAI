@@ -27,6 +27,24 @@ services:
       timeout: 5s
       retries: 5
 
+  # Message broker + result store for the Celery workers (OCR, translation,
+  # field-mapping). No `ports:` on purpose — only other containers need it,
+  # reached by the service name "redis" on the Docker network.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Redis is in-memory by default, so a restart would silently drop every
+    # queued task. Append-only mode logs each write to disk (on the volume
+    # below) so queued work survives a Redis restart/recreate.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   # Ollama's own image already auto-detects CUDA at runtime and falls back
   # to CPU on its own — no custom build needed here, just the same cpu/gpu
   # profile split used for surya-inference/ocr below, so GPU access is only
@@ -108,32 +126,23 @@ services:
       DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql+asyncpg://postgres:postgres@db:5432/lending_poc}
       OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e4b-it-qat}
-      # Read-phase circuit breaker for a wedged Ollama, not a per-request SLA.
-      # Must stay above a real cold load (2+ min — firing mid-load makes Ollama
-      # abort it) but not far past the gateway timeout, since past that
-      # the call still holds field-mapping's request lock with nobody waiting.
-      # Default matches the gateway's 300s. See the matching comment on
-      # request_timeout in field_mapping_poc/config.py.
-      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-300}
-      SURYA_INFERENCE_URL: ${SURYA_INFERENCE_URL:-http://surya-inference:8000/v1}
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-600}
+      OCR_TASK_TIME_LIMIT_SECONDS: ${OCR_TASK_TIME_LIMIT_SECONDS:-600}
+      SURYA_INFERENCE_URL: http://surya-inference:8000/v1
       SURYA_INFERENCE_AUTOSTART: "false"
-      SURYA_LIVENESS_PROBE_INTERVAL_SECONDS: ${SURYA_LIVENESS_PROBE_INTERVAL_SECONDS:-10}
-      SURYA_LIVENESS_PROBE_TIMEOUT_SECONDS: ${SURYA_LIVENESS_PROBE_TIMEOUT_SECONDS:-5}
+      # Fixed Docker-network hostnames (not read from .env, whose values are
+      # for bare-metal runs). Broker (task queue) and result backend use
+      # separate Redis databases so their keys never mix.
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
       APP_BASE_URL: http://127.0.0.1:8000
       TRANSLATION_BASE_URL: http://127.0.0.1:8001
       FIELD_MAPPING_BASE_URL: http://127.0.0.1:8002
       OCR_BASE_URL: http://127.0.0.1:8010
-      # Each backend has a model in its path and can legitimately run for
-      # minutes (OCR to Surya, translation/field-mapping to Ollama) — these match
-      # the timeouts the frontend already budgets for the same calls, so the
-      # gateway is never the first link in the chain to give up.
-      OCR_REQUEST_TIMEOUT_SECONDS: ${OCR_REQUEST_TIMEOUT_SECONDS:-300}
+      OCR_REQUEST_TIMEOUT_SECONDS: ${OCR_REQUEST_TIMEOUT_SECONDS:-120}
       TRANSLATION_REQUEST_TIMEOUT_SECONDS: ${TRANSLATION_REQUEST_TIMEOUT_SECONDS:-300}
-      FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS: ${FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS:-300}
+      FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS: ${FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS:-30}
       APP_REQUEST_TIMEOUT_SECONDS: ${APP_REQUEST_TIMEOUT_SECONDS:-300}
-      GATEWAY_CLIENT_TIMEOUT_SECONDS: ${GATEWAY_CLIENT_TIMEOUT_SECONDS:-120}
-      HEALTH_PROXY_TIMEOUT_SECONDS: ${HEALTH_PROXY_TIMEOUT_SECONDS:-5}
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
     volumes:
       - .:/app
       # OCR (surya-ocr) pulls its models from the HuggingFace hub on first
@@ -150,6 +159,8 @@ services:
     # you're not running (e.g. waiting on ollama-gpu while running COMPOSE_PROFILES=cpu).
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       ollama:
         condition: service_started
@@ -198,6 +209,7 @@ services:
 # container recreation instead of being re-fetched/reset every time.
 volumes:
   pgdata:
+  redis_data:
   ollama_models:
   surya_models:
   hf_cache:
