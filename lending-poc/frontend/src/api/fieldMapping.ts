@@ -1,10 +1,6 @@
 import { apiClient } from './client'
-<<<<<<< HEAD
-import { env } from '@/config/env'
-=======
 import { pollTask } from './tasks'
 import { taskSubmitResponseSchema } from '@/schemas/task.schema'
->>>>>>> chore/add-celery
 import {
   fieldMappingResultSchema,
   type FieldMappingResult,
@@ -18,10 +14,6 @@ export interface MapFieldsInput {
   template: FieldMappingTemplateEntry | unknown
 }
 
-<<<<<<< HEAD
-// The backend calls out to a local LLM (Ollama) per request, which can run
-// well past the client's default timeout under load or for longer text.
-=======
 // POST /map only validates and queues the request (the LLM call runs in a
 // background worker), so it replies quickly.
 const MAP_SUBMIT_TIMEOUT_MS = 30 * 1000
@@ -30,7 +22,6 @@ const MAP_SUBMIT_TIMEOUT_MS = 30 * 1000
 // is the real limit. This catches a worker that dies mid-task.
 const MAP_FIELDS_MAX_PROCESSING_MS = 30 * 60 * 1000
 
->>>>>>> chore/add-celery
 /**
  * Queues field mapping for a single document, then waits for the background
  * job to finish. The backend (field_mapping_poc/api.py) accepts
@@ -46,11 +37,7 @@ export async function mapFields(input: MapFieldsInput): Promise<FieldMappingResu
       ocr_text: input.text,
       json_format: JSON.stringify(input.template),
     },
-<<<<<<< HEAD
-    { timeout: env.VITE_MAP_FIELDS_TIMEOUT_MS }
-=======
     { timeout: MAP_SUBMIT_TIMEOUT_MS }
->>>>>>> chore/add-celery
   )
   const { task_id } = taskSubmitResponseSchema.parse(response.data)
 

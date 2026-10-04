@@ -2,14 +2,11 @@ import axios from 'axios'
 import { env } from '@/config/env'
 import { toAppError } from '@/lib/errors'
 
-<<<<<<< HEAD
-=======
 // Slow work (OCR, translation, field mapping) runs in background workers and
 // is polled, and the remaining slow calls set their own timeout, so this
 // only covers quick requests.
 const DEFAULT_TIMEOUT_MS = 30 * 1000
 
->>>>>>> chore/add-celery
 export const apiClient = axios.create({
   baseURL: env.VITE_API_BASE_URL,
   timeout: env.VITE_DEFAULT_TIMEOUT_MS,
