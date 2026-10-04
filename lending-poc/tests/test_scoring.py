@@ -43,8 +43,8 @@ def test_score_renormalizes_over_observed_check_types_only():
 
 def test_absent_optional_check_type_does_not_change_the_score():
     """The reason SALARY_CONTINUITY's weight was not carved out of another
-    check's: a case with no gap months must score exactly as it would have
-    before that check type existed."""
+    check's: a case whose slips cover every statement month must score
+    exactly as it would have before that check type existed."""
     without = compute_score(
         [_result(CheckType.NAME, 90.0), _result(CheckType.SALARY_CREDIT_COUNT, 60.0)]
     )

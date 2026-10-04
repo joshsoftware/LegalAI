@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import { env } from '@/config/env'
 import { extractResponseSchema, type ExtractResponse } from '@/schemas/extract.schema'
 
 // OCR extraction is CPU-bound and can take well over the client's default
@@ -7,9 +8,6 @@ import { extractResponseSchema, type ExtractResponse } from '@/schemas/extract.s
 // documents in a batch wait on earlier ones). CPU-only Surya can take
 // several minutes per handwritten page, so this must stay aligned with the
 // gateway's OCR_REQUEST_TIMEOUT_SECONDS default.
-// TEMP(slow-host testing): raised from 5min to 30min. Revert before merging.
-const EXTRACT_TIMEOUT_MS = 30 * 60 * 1000
-
 /**
  * POSTs a single file to /extract. The backend processes one file per call,
  * and the multipart field name must be "file" (lowercase), matching the
@@ -21,7 +19,7 @@ export async function extractOne(file: File): Promise<ExtractResponse> {
 
   const response = await apiClient.post('/extract', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
-    timeout: EXTRACT_TIMEOUT_MS,
+    timeout: env.VITE_EXTRACT_TIMEOUT_MS,
   })
 
   return extractResponseSchema.parse(response.data)
