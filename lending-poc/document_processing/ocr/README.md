@@ -96,10 +96,10 @@ celery -A tasks worker -Q ocr --concurrency=1 -n ocr@%h
 
 `--concurrency=1` matters: Surya crashes if two jobs use it at once. The
 worker has no auto-reload — restart it after changing `tasks.py` or the
-extractor. Each job may run for `OCR_TASK_TIME_LIMIT_SECONDS` (default 600)
-before it's stopped — in practice up to 30s longer, since a blocked Surya
-call can usually only be stopped by killing the worker process at that
-point (Celery then starts a fresh one). The surya-inference server still
+extractor. Each job may run for `OCR_TASK_TIME_LIMIT_SECONDS` (default 600),
+counted from when the worker starts it (time spent waiting in the queue
+doesn't count). If it's still running after that, the worker process is
+killed and Celery starts a fresh one. The surya-inference server still
 finishes any pages it was already working on, so jobs right after a timeout
 run slower until it catches up.
 

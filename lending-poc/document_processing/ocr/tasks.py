@@ -22,7 +22,6 @@ from typing import Any, Dict
 
 import redis
 from celery import Celery
-from celery.exceptions import SoftTimeLimitExceeded
 from celery.signals import worker_process_init
 
 from extractor import Extractor, DEFAULT_ENGINE
@@ -30,9 +29,7 @@ from extractor import Extractor, DEFAULT_ENGINE
 BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
 RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "redis://localhost:6379/1")
 
-# Nothing else bounds an OCR job (unlike the LLM services, whose Ollama read
-# timeout does), so a stuck Surya call would hold the worker forever. Raise
-# it on slow CPU-only hosts, where handwritten pages take minutes each.
+
 OCR_TASK_TIME_LIMIT_SECONDS = int(os.environ.get("OCR_TASK_TIME_LIMIT_SECONDS", "600"))
 
 celery_app = Celery("ocr", broker=BROKER_URL, backend=RESULT_BACKEND)
@@ -98,18 +95,14 @@ def _start_background_threads(**_kwargs: Any) -> None:
     threading.Thread(target=_warm_up, name="ocr-warm-up", daemon=True).start()
 
 
-# soft_time_limit raises SoftTimeLimitExceeded inside the task so cleanup can
-# run — but only once Python regains control, and a blocked Surya call
-# usually doesn't give it back. In testing it was time_limit (30s later) that
-# actually stopped the job, by killing the worker process; Celery then starts
-# a fresh one, which warms up again. Killing the worker doesn't cancel pages
-# already sent to surya-inference: it finishes them anyway, so the next few
-# jobs run slower until it catches up.
-@celery_app.task(
-    name="ocr.extract",
-    soft_time_limit=OCR_TASK_TIME_LIMIT_SECONDS,
-    time_limit=OCR_TASK_TIME_LIMIT_SECONDS + 30,
-)
+# time_limit is a hard limit: if the task is still running this many seconds
+# after the worker started it, Celery kills the worker process (nothing in
+# the task gets to run, not even the `finally` below) and starts a fresh one,
+# which warms up again. A soft limit isn't used: a blocked Surya call can't
+# be interrupted, so it never got the chance to act. Killing the worker
+# doesn't cancel pages already sent to surya-inference: it finishes them
+# anyway, so the next few jobs run slower until it catches up.
+@celery_app.task(name="ocr.extract", time_limit=OCR_TASK_TIME_LIMIT_SECONDS)
 def extract_task(file_path: str, filename: str, file_extension: str) -> Dict[str, Any]:
     """Run OCR on a file api.py saved to disk, then delete the file.
 
@@ -120,8 +113,6 @@ def extract_task(file_path: str, filename: str, file_extension: str) -> Dict[str
     try:
         with _engine_lock:
             result = extractor.process_document(file_path)
-    except SoftTimeLimitExceeded:
-        raise RuntimeError(f"OCR did not finish within {OCR_TASK_TIME_LIMIT_SECONDS}s") from None
     finally:
         try:
             os.unlink(file_path)
