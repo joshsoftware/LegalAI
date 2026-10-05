@@ -5,7 +5,8 @@ matched against bank transactions inside a broad, month-level window.
 A slip is evidence for exactly one month -- its own. Statement months with
 no submitted slip are reported as missing (SALARY_CONTINUITY) rather than
 checked against a neighbouring slip's declared salary, which would let one
-slip stand in as income evidence for a month it says nothing about.
+slip stand in as income evidence for a month it says nothing about. The
+statement's final month is exempt from that report.
 """
 
 from calendar import monthrange
@@ -354,27 +355,19 @@ def _salary_credit_count(
 def _statement_months(bank_statement: BankStatementDoc) -> list[date]:
     """Return the calendar months a bank statement covers.
 
-    A trailing partial month is excluded: the statement was pulled part-way
-    through it, so that month's slip has not been issued yet and reporting it
-    as missing would penalise an applicant for a document that cannot exist.
-
     Args:
         bank_statement (BankStatementDoc): The statement whose transaction
             dates define the covered period.
 
     Returns:
-        list[date]: First-of-month dates in chronological order, or an empty
-            list if no transaction carries a date.
+        list[date]: First-of-month dates in chronological order, from the
+            earliest to the latest transaction date, partial months at both
+            ends included. Empty if no transaction carries a date.
     """
     txn_dates = [t.txn_date for t in bank_statement.transactions if t.txn_date is not None]
     if not txn_dates:
-        return []   
-
-    last = max(txn_dates)
-    months = _split_into_months(min(txn_dates), last)
-    if months and last.day < monthrange(last.year, last.month)[1]:
-        months.pop()
-    return months
+        return []
+    return _split_into_months(min(txn_dates), max(txn_dates))
 
 
 def _months_with_a_slip(salary_slips: list[SalarySlipDoc]) -> set[date]:
@@ -393,7 +386,7 @@ def _months_with_a_slip(salary_slips: list[SalarySlipDoc]) -> set[date]:
 def _missing_slip_checks(
     salary_slips: list[SalarySlipDoc], bank_statement: BankStatementDoc
 ) -> list[ValidationResult]:
-    """Report every statement month that has no submitted salary slip.
+    """Report every statement month, except the last, that has no submitted salary slip.
 
     Args:
         salary_slips (list[SalarySlipDoc]): The slips submitted with the case.
@@ -406,6 +399,10 @@ def _missing_slip_checks(
             evidence["month"]. Empty when every month has a slip.
     """
     covered = _months_with_a_slip(salary_slips)
+    # The final month is never required, partial or full: a statement is
+    # usually pulled during or just after it, before that month's slip has
+    # been issued, so its absence says nothing about the applicant.
+    months_needing_a_slip = _statement_months(bank_statement)[:-1]
     return [
         ValidationResult(
             check_type=CheckType.SALARY_CONTINUITY,
@@ -415,7 +412,7 @@ def _missing_slip_checks(
             failure_reason="no_salary_slip_for_month",
             evidence={"month": month},
         )
-        for month in _statement_months(bank_statement)
+        for month in months_needing_a_slip
         if month not in covered
     ]
 

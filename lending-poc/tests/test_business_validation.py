@@ -130,8 +130,9 @@ def _matched_transactions(results):
 
 
 def test_statement_months_without_a_slip_are_reported():
-    """Jan and Jun slips against a Jan-Aug statement: the other six months
-    are reported missing, attributed to no document."""
+    """Jan and Jun slips against a Jan-Aug statement: Feb-May and Jul are
+    reported missing, attributed to no document. Aug is the final month and
+    is never required."""
     case = _case(
         [_slip("SLIP-JAN", date(2026, 1, 1)), _slip("SLIP-JUN", date(2026, 6, 1))],
         [_txn(date(2026, 1, 15)), _txn(date(2026, 6, 15)), _txn(date(2026, 8, 31))],
@@ -145,7 +146,6 @@ def test_statement_months_without_a_slip_are_reported():
         date(2026, 4, 1),
         date(2026, 5, 1),
         date(2026, 7, 1),
-        date(2026, 8, 1),
     }
     for result in _missing(results):
         assert not result.passed
@@ -172,7 +172,8 @@ def test_a_credit_in_an_uncovered_month_is_not_claimed_by_any_slip():
     # The March credit is evidence for nothing -- it is outside January's
     # window (Dec 27 -> Feb 28) and no other slip exists to claim it.
     assert march_credit not in _matched_transactions(results)
-    assert _missing_months(results) == {date(2026, 2, 1), date(2026, 3, 1)}
+    # March is the statement's final month, so only February is missing.
+    assert _missing_months(results) == {date(2026, 2, 1)}
 
 
 def test_each_credit_can_be_claimed_by_only_one_slip():
@@ -239,9 +240,10 @@ def test_trailing_partial_month_is_not_reported_missing():
     assert _missing(results) == []
 
 
-def test_fully_covered_final_month_without_a_slip_is_reported():
-    """The contrast to the test above: once the statement runs to Sept 30,
-    September is a complete month and its absent slip is a genuine gap."""
+def test_full_final_month_is_not_reported_missing():
+    """Even when the statement runs to Sept 30, September is the final month
+    and is never required -- the slip may still not be in hand when the
+    statement is pulled."""
     slips = [_slip(f"SLIP-{m}", date(2026, m, 1)) for m in range(3, 9)]  # Mar..Aug
     transactions = [
         _txn(date(2026, 3, 16)),
@@ -255,7 +257,7 @@ def test_fully_covered_final_month_without_a_slip_is_reported():
 
     results = run_business_validation(_case(slips, transactions))
 
-    assert _missing_months(results) == {date(2026, 9, 1)}
+    assert _missing(results) == []
 
 
 def test_slip_without_a_salary_month_covers_nothing():
@@ -264,12 +266,28 @@ def test_slip_without_a_salary_month_covers_nothing():
     undated = SalarySlipDoc(
         doc_id="SLIP-UNDATED", employer_name=EMPLOYER, net_salary=SALARY, salary_month=None
     )
-    case = _case([undated], [_txn(date(2026, 3, 2)), _txn(date(2026, 3, 31))])
+    # The April txn makes April the final (exempt) month, so March is checked.
+    case = _case([undated], [_txn(date(2026, 3, 2)), _txn(date(2026, 4, 5))])
 
     results = run_business_validation(case)
 
     assert _salary_date(results, "SLIP-UNDATED").failure_reason == "missing_salary_month"
     assert _missing_months(results) == {date(2026, 3, 1)}
+
+
+def test_single_month_statement_reports_nothing():
+    """A statement covering only March has March as its final month, so no
+    month is left to require a slip for -- even though no March slip exists.
+    (A slip for some other month is needed only because validation is
+    skipped entirely for a case with no slips.)"""
+    case = _case(
+        [_slip("SLIP-JAN", date(2026, 1, 1))],
+        [_txn(date(2026, 3, 1)), _txn(date(2026, 3, 31))],
+    )
+
+    results = run_business_validation(case)
+
+    assert _missing(results) == []
 
 
 def test_statement_with_no_transactions_produces_no_results():
