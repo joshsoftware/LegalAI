@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Docker entrypoint for the combined "backend" image: runs app, translation,
 # field-mapping, ocr, and gateway as five separate uvicorn processes in one
-# container. Mirrors scripts/start-backend.sh (the bare-metal equivalent) —
+# container, plus the Celery workers that run OCR, translation and field-mapping jobs. Mirrors scripts/start-backend.sh (the bare-metal equivalent) —
 # none of the five services' own code is touched here, this just launches
 # their existing entrypoints on their existing internal ports.
 set -euo pipefail
@@ -25,10 +25,25 @@ pids+=("$!")
 (cd /app/document_processing/translation && exec uvicorn api_server:app --host 0.0.0.0 --port 8001 "${RELOAD_FLAG[@]}") &
 pids+=("$!")
 
+# Translation's Celery worker: runs the LLM calls /translate/text queues.
+(cd /app/document_processing/translation && exec celery -A tasks worker -Q translation --concurrency=1 -n translation@%h --loglevel=INFO) &
+pids+=("$!")
+
 (cd /app/field_mapping_poc && exec uvicorn api:app --host 0.0.0.0 --port 8002 "${RELOAD_FLAG[@]}") &
 pids+=("$!")
 
+# Field mapping's Celery worker: runs the LLM calls /map queues.
+(cd /app/field_mapping_poc && exec celery -A tasks worker -Q field_mapping --concurrency=1 -n field_mapping@%h --loglevel=INFO) &
+pids+=("$!")
+
 (cd /app/document_processing/ocr && exec uvicorn api:app --host 0.0.0.0 --port 8010 "${RELOAD_FLAG[@]}") &
+pids+=("$!")
+
+# OCR's Celery worker: the ocr API above only queues uploads; this process
+# runs the actual OCR (see document_processing/ocr/tasks.py). Celery has no
+# --reload, so after editing tasks.py or the extractor, restart the container
+# for the worker to pick up the change.
+(cd /app/document_processing/ocr && exec celery -A tasks worker -Q ocr --concurrency=1 -n ocr@%h --loglevel=INFO) &
 pids+=("$!")
 
 (cd /app/gateway && exec uvicorn main:app --host 0.0.0.0 --port 8080 "${RELOAD_FLAG[@]}") &

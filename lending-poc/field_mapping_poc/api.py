@@ -2,17 +2,19 @@
 """FastAPI web service for Field Mapping.
 
 Provides REST API endpoints for mapping OCR text to a target JSON schema.
-Built as a wrapper around the existing FieldMapper.
+The mapping itself (an LLM call) runs in a separate Celery worker (see
+tasks.py); /map validates the request, queues it and replies with a task id.
+Clients poll the gateway's GET /tasks/{task_id} for the result.
 
 Usage:
     uvicorn api:app --host 0.0.0.0 --port 8002 --reload
+    celery -A tasks worker -Q field_mapping --concurrency=1 -n field_mapping@%h
 
 Endpoints:
-    POST /map     - Map OCR text to the provided JSON schema
+    POST /map     - Validate and queue a mapping; returns 202 + task_id
     GET /health   - Health check endpoint
 """
 
-import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -23,12 +25,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 import uvicorn
 
-from core.mapper import FieldMapper
-from core.ollama_client import OllamaClientError
-from core.response_parser import ResponseParseError
-
-# Initialize field mapper (reused across requests for efficiency)
-mapper = FieldMapper()
+from tasks import map_task, mapper
 
 
 @asynccontextmanager
@@ -46,11 +43,6 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
-
-# The local Ollama model serves one generation at a time anyway; serialize
-# calls through the shared client rather than letting them race across
-# threads.
-_map_lock = asyncio.Lock()
 
 logger = logging.getLogger(__name__)
 
@@ -98,16 +90,17 @@ async def health_check() -> HealthResponse:
         model=mapper.client.model,
     )
 
-@app.post("/map")
+@app.post("/map", status_code=202)
 async def map_fields(request: MapRequest) -> Dict[str, Any]:
     """
-    Map fields from OCR text based on the provided JSON format.
-    
+    Queue a mapping of OCR text onto the provided JSON format.
+
     Accepts:
     - ocr_text: String containing the raw OCR text.
     - json_format: String containing the target JSON schema.
-    
-    Returns: JSON response strictly adhering to the outer layer of json_format.
+
+    Returns: 202 with a task_id; poll GET /tasks/{task_id} (on the gateway)
+    for the JSON strictly adhering to the outer layer of json_format.
     """
     try:
         # Parse the JSON format string into a dictionary
@@ -118,8 +111,15 @@ async def map_fields(request: MapRequest) -> Dict[str, Any]:
             detail=f"Invalid JSON format provided: {str(e)}"
         )
 
-    # Fail fast when Ollama is known-down, before queueing on _map_lock —
-    # otherwise concurrent callers pile up serially behind a doomed request.
+    # Same checks FieldMapper.map_fields makes, done here so bad input still
+    # gets an immediate 400 instead of a queued task that fails later.
+    if not request.ocr_text or not request.ocr_text.strip():
+        raise HTTPException(status_code=400, detail="document_text is empty")
+    if not schema:
+        raise HTTPException(status_code=400, detail="schema must not be empty")
+
+    # Fail fast when Ollama is known-down, before queueing the task —
+    # otherwise tasks pile up in the queue behind a doomed one.
     #
     # Deliberately `== "unreachable"`, NOT `!= "ok"`: "initializing" means the
     # server is up but the model hasn't answered yet — i.e. a cold load is in
@@ -128,7 +128,7 @@ async def map_fields(request: MapRequest) -> Dict[str, Any]:
     #
     # This is a fast path, not a guarantee: status can be up to
     # OLLAMA_HEALTH_RECHECK_SECONDS stale, and Ollama can wedge mid-call, so
-    # the timeout/retry handling below still has to stand on its own.
+    # OllamaClient's own timeout/retry handling still has to stand on its own.
     if mapper.client.health_status() == "unreachable":
         raise HTTPException(
             status_code=503,
@@ -137,20 +137,13 @@ async def map_fields(request: MapRequest) -> Dict[str, Any]:
         )
 
     try:
-        # Runs in a worker thread so this synchronous LLM call doesn't block
-        # the event loop, serialized since the local model only serves one
-        # generation at a time anyway.
-        async with _map_lock:
-            result = await run_in_threadpool(mapper.map_fields, schema, request.ocr_text)
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except (OllamaClientError, ResponseParseError) as e:
-        logger.error("Field mapping failed: %s", e)
-        raise HTTPException(status_code=500, detail=f"Field mapping error: {str(e)}")
+        # .delay() talks to Redis synchronously, so keep it off the event loop.
+        task = await run_in_threadpool(map_task.delay, request.ocr_text, schema)
     except Exception as e:
-        logger.error("Unexpected error during field mapping: %s", e)
-        raise HTTPException(status_code=500, detail="Internal server error")
+        logger.error("Could not queue field mapping: %s", e)
+        raise HTTPException(status_code=503, detail=f"Could not queue the mapping: {str(e)}")
+
+    return {"task_id": task.id, "status": "PENDING"}
 
 @app.get("/")
 async def root() -> Dict[str, Any]:
@@ -159,7 +152,7 @@ async def root() -> Dict[str, Any]:
         "message": "Field Mapping API",
         "version": "1.0.0",
         "endpoints": {
-            "POST /map": "Map OCR text to the provided JSON schema",
+            "POST /map": "Queue a mapping of OCR text to the provided JSON schema; returns a task_id",
             "GET /health": "Health check",
             "GET /": "This information"
         }

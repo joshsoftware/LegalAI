@@ -79,26 +79,50 @@ python main.py --engine surya
 
 ### 2. REST API
 
-Start the API server:
+The API doesn't run OCR itself: `/extract` saves the upload, queues a job in
+Redis and replies immediately with a task id. A Celery worker (`tasks.py`)
+runs the OCR. Both need Redis (`CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND`,
+default `redis://localhost:6379/0` and `/1`).
+
+Start the API server and the worker:
 ```bash
 make api-dev
 # or
 uvicorn api:app --host 0.0.0.0 --port 8000 --reload
+
+# in a second terminal
+celery -A tasks worker -Q ocr --concurrency=1 -n ocr@%h
 ```
+
+`--concurrency=1` matters: Surya crashes if two jobs use it at once. The
+worker has no auto-reload — restart it after changing `tasks.py` or the
+extractor. Each job may run for `OCR_TASK_TIME_LIMIT_SECONDS` (default 600),
+counted from when the worker starts it (time spent waiting in the queue
+doesn't count). If it's still running after that, the worker process is
+killed and Celery starts a fresh one. The surya-inference server still
+finishes any pages it was already working on, so jobs right after a timeout
+run slower until it catches up.
 
 #### API Endpoints
 
-- **POST /extract** - Upload and process documents
-- **GET /health** - Health check
+- **POST /extract** - Validate and queue a document; returns `202 {"task_id": ...}`
+- **GET /health** - Health check, reflecting the OCR worker's status (from its Redis heartbeat)
 - **GET /** - API information
 - **GET /docs** - Interactive API documentation (Swagger UI)
+
+The result is read from the gateway's `GET /tasks/{task_id}` (this service
+has no result endpoint of its own).
 
 #### Example API Usage
 
 ```bash
-# Upload a document for processing
-curl -X POST "http://localhost:8000/extract" \
+# Queue a document for processing (through the gateway)
+curl -X POST "http://localhost:8080/extract" \
   -F "file=@document.pdf"
+# → {"task_id": "f69eda69-...", "status": "PENDING"}
+
+# Poll until status is SUCCESS or FAILURE
+curl http://localhost:8080/tasks/f69eda69-...
 
 # Check API health
 curl http://localhost:8000/health
@@ -107,7 +131,9 @@ curl http://localhost:8000/health
 open http://localhost:8000/docs
 ```
 
-#### API Response Format
+#### Task Result Format
+
+Returned as `result` by `GET /tasks/{task_id}` once the job succeeds:
 
 ```json
 {

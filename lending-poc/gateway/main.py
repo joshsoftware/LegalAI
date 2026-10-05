@@ -17,7 +17,10 @@ import os
 from contextlib import asynccontextmanager
 
 import httpx
+from celery import Celery
+from celery.exceptions import TimeLimitExceeded
 from fastapi import FastAPI, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
@@ -26,19 +29,23 @@ TRANSLATION_BASE_URL = os.environ.get("TRANSLATION_BASE_URL", "http://127.0.0.1:
 FIELD_MAPPING_BASE_URL = os.environ.get("FIELD_MAPPING_BASE_URL", "http://127.0.0.1:8002")
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://127.0.0.1:8000")
 
-# Per-service request timeouts. Every backend has a model somewhere in its
-# path and can legitimately run for minutes — OCR calls Surya,
-# translation/field-mapping call Ollama, and /cases loads a
-# sentence-transformers embedding model on its first request (downloading it
-# from HuggingFace if it isn't cached yet, which alone outlasts any short
-# timeout). These match the timeouts the frontend already budgets for the
-# same calls (see frontend/src/api/{extract,translation,fieldMapping}.ts), so
-# the gateway is never the first link in the chain to give up.
-# TEMP(slow-host testing): raised from 300s to 1800s. Revert before merging.
-OCR_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("OCR_REQUEST_TIMEOUT_SECONDS", "1800"))
-TRANSLATION_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("TRANSLATION_REQUEST_TIMEOUT_SECONDS", "1800"))
-FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS", "1800"))
-APP_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("APP_REQUEST_TIMEOUT_SECONDS", "1800"))
+# Where Celery workers store task state/results (see GET /tasks/{task_id}).
+# The gateway only ever reads from it — it never sends or runs tasks — so it
+# needs no broker and none of the services' task code.
+CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "redis://127.0.0.1:6379/1")
+celery_results = Celery("gateway", backend=CELERY_RESULT_BACKEND)
+
+# Per-service request timeouts: how long one proxied HTTP call may take.
+# /extract, /translate/text and /map only validate and queue work for a
+# Celery worker, so they reply quickly (OCR's budget covers a 50MB upload).
+# /translate/files and /cases still do their work inside the request —
+# /cases also loads a sentence-transformers model on its first call — so
+# translation and app keep longer budgets. How long the work itself may run
+# is limited by the workers, not here.
+OCR_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("OCR_REQUEST_TIMEOUT_SECONDS", "120"))
+TRANSLATION_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("TRANSLATION_REQUEST_TIMEOUT_SECONDS", "300"))
+FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("FIELD_MAPPING_REQUEST_TIMEOUT_SECONDS", "30"))
+APP_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("APP_REQUEST_TIMEOUT_SECONDS", "300"))
 
 # Headers that must not be forwarded as-is between hops (RFC 7230) plus a few
 # that httpx/Starlette will recompute themselves and that would otherwise
@@ -54,11 +61,8 @@ RESPONSE_STRIP_HEADERS = HOP_BY_HOP_HEADERS | {"content-length", "content-encodi
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Client-level default only — every proxied route passes its own
-    # per-request timeout below, which overrides this. Kept in step with those
-    # so a future route that forgets to pass one doesn't silently get a
-    # shorter budget than the rest of the chain.
-    # TEMP(slow-host testing): raised from 120s to 1800s. Revert before merging.
-    app.state.http = httpx.AsyncClient(timeout=1800.0)
+    # *_REQUEST_TIMEOUT_SECONDS value, which overrides this.
+    app.state.http = httpx.AsyncClient(timeout=120.0)
     yield
     await app.state.http.aclose()
 
@@ -125,6 +129,37 @@ async def map_fields(request: Request) -> Response:
 @app.post("/cases")
 async def create_case(request: Request) -> Response:
     return await _proxy(request, APP_BASE_URL, "/cases", timeout=APP_REQUEST_TIMEOUT_SECONDS)
+
+
+# --- Background task status (shared by every service that queues Celery
+# tasks, e.g. POST /extract) ---
+
+def _read_task(task_id: str) -> dict:
+    result = celery_results.AsyncResult(task_id)
+    body: dict = {"task_id": task_id, "status": result.state}
+    if result.state == "SUCCESS":
+        body["result"] = result.result
+    elif result.state == "FAILURE":
+        # On failure, .result holds the exception the task raised.
+        if isinstance(result.result, TimeLimitExceeded):
+            # Worker killed the job at its hard time limit; str() would only
+            # give "TimeLimitExceeded(630,)".
+            body["error"] = "The job took too long and was stopped."
+        else:
+            body["error"] = str(result.result)
+    return body
+
+
+@app.get("/tasks/{task_id}")
+async def task_status(task_id: str) -> Response:
+    try:
+        # AsyncResult reads Redis synchronously, so keep it off the event loop.
+        return JSONResponse(content=await run_in_threadpool(_read_task, task_id))
+    except Exception as exc:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": f"Task result store unavailable: {exc}"},
+        )
 
 
 # --- Per-service health (namespaced since all four modules define /health) ---
@@ -217,10 +252,11 @@ async def root() -> dict:
     return {
         "message": "Lending POC Gateway",
         "endpoints": {
-            "POST /extract": "OCR text extraction (proxies document_processing/ocr)",
-            "POST /translate/text": "Translate text (proxies document_processing/translation)",
+            "POST /extract": "Queue OCR text extraction; returns a task_id (proxies document_processing/ocr)",
+            "GET /tasks/{task_id}": "Status and result of a queued background task",
+            "POST /translate/text": "Queue text translation; returns a task_id (proxies document_processing/translation)",
             "POST /translate/files": "Translate files (proxies document_processing/translation)",
-            "POST /map": "Field mapping (proxies field_mapping_poc)",
+            "POST /map": "Queue field mapping; returns a task_id (proxies field_mapping_poc)",
             "POST /cases": "Case submission and decisioning (proxies app)",
             "GET /health": "Aggregated health of all four backend services",
             "GET /ocr/health": "OCR service health",

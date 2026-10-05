@@ -7,7 +7,8 @@ GET  /health
     Checks model reachability and shows KB sizes per domain.
 
 POST /translate/text
-    Translates a single plain-text string. Accepts a `domain` field in the body.
+    Queues translation of a single plain-text string (run by the Celery worker
+    in tasks.py) and returns a task id. Accepts a `domain` field in the body.
 
 POST /translate/files
     Accepts one or more uploaded .txt files. Accepts a `domain` query parameter.
@@ -21,7 +22,7 @@ from fastapi.concurrency import run_in_threadpool
 
 from .models import (
     TextTranslateRequest,
-    TextTranslateResponse,
+    TaskSubmittedResponse,
     FilesTranslateResponse,
     HealthResponse,
     TranslationResult,
@@ -29,9 +30,12 @@ from .models import (
 )
 from translation_service.config import SUPPORTED_DOMAINS, DEFAULT_DOMAIN, MODEL_NAME, MODEL_ADAPTER
 from translation_service.kb.retriever import retrieve
+from tasks import translate_task
 
 router = APIRouter()
 
+# Used by /translate/files only — /translate/text queues its work for the
+# Celery worker instead (see tasks.py).
 # service.translate() makes a blocking call to the local Ollama model, which
 # (per this module's own README) only serves one request at a time. Run it
 # in a worker thread so it doesn't freeze the event loop for other requests
@@ -130,13 +134,15 @@ async def health(request: Request):
 
 @router.post(
     "/translate/text",
-    response_model=TextTranslateResponse,
-    summary="Translate a plain-text string",
+    response_model=TaskSubmittedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Queue translation of a plain-text string",
     tags=["Translation"],
 )
 async def translate_text(body: TextTranslateRequest, request: Request):
     """
-    Accepts a JSON body and returns the English translation.
+    Accepts a JSON body and queues its English translation. Returns a
+    task_id; poll GET /tasks/{task_id} on the gateway for the result.
 
     Set `domain` to `"banking"` (default) or `"legal"` to use the correct KB.
 
@@ -148,28 +154,20 @@ async def translate_text(body: TextTranslateRequest, request: Request):
     }
     ```
     """
-    service = _get_service(request, body.domain)
+    _get_service(request, body.domain)
     # After _get_service so an unknown domain still gets its more specific,
     # permanent 400 regardless of Ollama's state.
     _reject_if_ollama_down(request)
     try:
-        matches = retrieve(body.text, service._kb)
-        async with _translate_lock:
-            translation = await run_in_threadpool(service.translate, body.text)
+        # .delay() talks to Redis synchronously, so keep it off the event loop.
+        task = await run_in_threadpool(translate_task.delay, body.text, body.domain)
     except Exception as exc:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Translation failed: {exc}",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Could not queue the translation: {exc}",
         )
 
-    return TextTranslateResponse(
-        result=TranslationResult(
-            source="direct_text",
-            domain=body.domain,
-            translation=translation,
-            kb_matches=len(matches),
-        )
-    )
+    return TaskSubmittedResponse(task_id=task.id, status="PENDING")
 
 
 # ---------------------------------------------------------------------------
