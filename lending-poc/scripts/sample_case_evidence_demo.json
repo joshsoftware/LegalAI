@@ -1,0 +1,72 @@
+{
+  "applicant_ref": "APP-DEMO-0001",
+  "documents": [
+    {
+      "doc_type": "AADHAAR",
+      "extracted_fields": {
+        "name": "Rahul Kumar Sharma",
+        "address": "12, MG Road, Indiranagar, Bengaluru, Karnataka 560038",
+        "aadhaar_number": "XXXX XXXX 5678",
+        "date_of_birth": "1992-08-19"
+      },
+      "source_file_ref": "demo/aadhaar.pdf"
+    },
+    {
+      "doc_type": "PAN",
+      "extracted_fields": {
+        "name": "Rahul K Sharma",
+        "pan_number": "ABCPS1234K",
+        "date_of_birth": "1992-08-18"
+      },
+      "source_file_ref": "demo/pan.pdf"
+    },
+    {
+      "doc_type": "SALARY_SLIP",
+      "salary_slips": [
+        {
+          "extracted_fields": {
+            "name": "Rahul Kumar Sharma",
+            "employer_name": "Zenith Software Pvt Ltd",
+            "net_salary": 60000,
+            "salary_month": "2026-01"
+          },
+          "source_file_ref": "demo/slip_jan.pdf"
+        },
+        {
+          "extracted_fields": {
+            "name": "Rahul Sharma",
+            "employer_name": "Zenith Software Pvt Ltd",
+            "net_salary": 60000,
+            "salary_month": "2026-02"
+          },
+          "source_file_ref": "demo/slip_feb.pdf"
+        },
+        {
+          "extracted_fields": {
+            "name": "Rahul Kumar Sharma",
+            "employer_name": "Zenith Software Pvt Ltd",
+            "net_salary": 62000,
+            "salary_month": "2026-04"
+          },
+          "source_file_ref": "demo/slip_apr.pdf"
+        }
+      ]
+    },
+    {
+      "doc_type": "BANK_STATEMENT",
+      "extracted_fields": {
+        "name": "Rahul Kumar Sharma",
+        "transactions": [
+          { "narration": "NEFT ZENITH SOFTWARE PVT LTD SALARY JAN", "amount": 60000, "date": "2026-02-01" },
+          { "narration": "HOUSE RENT DEBIT", "amount": -18000, "date": "2026-02-05" },
+          { "narration": "NEFT ZENITH SOFTWARE PVT LTD SALARY FEB", "amount": 60000, "date": "2026-03-01" },
+          { "narration": "SWIGGY ORDER PAYMENT", "amount": -450, "date": "2026-03-12" },
+          { "narration": "UPI RANDOM TRANSFER", "amount": 58000, "date": "2026-04-03" },
+          { "narration": "ELECTRICITY BILL", "amount": -1800, "date": "2026-04-15" },
+          { "narration": "NEFT ZENITH SOFTWARE PVT LTD SALARY APR", "amount": 62000, "date": "2026-05-02" }
+        ]
+      },
+      "source_file_ref": "demo/bank_statement.pdf"
+    }
+  ]
+}

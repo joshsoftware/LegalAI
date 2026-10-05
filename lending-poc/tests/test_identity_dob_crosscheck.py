@@ -191,3 +191,21 @@ def test_missing_field_evidence_has_a_message_but_no_documents():
 
     assert pan_result.evidence["source_document"] is None
     assert pan_result.evidence["message"] == "No PAN number was found on any document."
+
+
+def test_name_message_does_not_call_a_reworded_name_exact():
+    """The matcher scores 100 for an expanded initial, but the two strings
+    differ -- 'exactly' would contradict the values shown beside it."""
+    case = _case(date(1994, 8, 19), date(1994, 8, 19))
+    case.pan.name = "Arjun R Iyer"
+    golden = build_golden_record(case)
+
+    name = next(
+        r for r in run_identity_validation(case, golden) if r.check_type == CheckType.NAME
+    )
+
+    assert name.score == 100.0
+    assert "exactly" not in name.evidence["message"]
+    assert name.evidence["message"] == (
+        "PAN name matches Aadhaar name (same name, written differently)."
+    )

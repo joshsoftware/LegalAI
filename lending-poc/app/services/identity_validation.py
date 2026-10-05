@@ -89,10 +89,20 @@ def _exact_result_to_validation(
     )
 
 
-def _name_message(source: str, target: str, score: float, passed: bool) -> str:
-    """Describe a name comparison, e.g. "PAN name exactly matches Aadhaar name."."""
-    if score >= 100.0:
+def _name_message(
+    source: str, target: str, source_name: str, target_name: str, score: float, passed: bool
+) -> str:
+    """Describe a name comparison, e.g. "PAN name exactly matches Aadhaar name.".
+
+    "Exactly" is reserved for names that are literally the same text. The
+    matcher also scores 100 for names that differ only by an initial or word
+    order ("Rahul K Sharma" vs "Rahul Kumar Sharma"), and calling those
+    "exact" would contradict the two values shown beside the message.
+    """
+    if " ".join(source_name.lower().split()) == " ".join(target_name.lower().split()):
         return f"{source} name exactly matches {target} name."
+    if score >= 100.0:
+        return f"{source} name matches {target} name (same name, written differently)."
     verb = "closely matches" if passed else "does not match"
     return f"{source} name {verb} {target} name (similarity {score:.0f}%)."
 
@@ -154,7 +164,12 @@ def validate_document_against_golden(
                     golden.name_source,
                     golden.name,
                     _name_message(
-                        doc_label(document_id), doc_label(golden.name_source), score, passed
+                        doc_label(document_id),
+                        doc_label(golden.name_source),
+                        doc_name,
+                        golden.name,
+                        score,
+                        passed,
                     ),
                 ),
             )
