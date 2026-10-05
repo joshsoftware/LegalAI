@@ -87,18 +87,45 @@ Notes:
       "passed": true,
       "score": 94.5,
       "document_id": "PAN",
-      "evidence": null
+      "evidence": {
+        "source_document": "PAN",
+        "source_value": "RAHUL K SHARMA",
+        "target_document": "AADHAAR",
+        "target_value": "RAHUL KUMAR SHARMA",
+        "message": "PAN name closely matches Aadhaar name (similarity 94%)."
+      }
     },
     {
       "check_type": "SALARY_DATE",
       "passed": false,
       "score": 0.0,
       "document_id": "SALARY_SLIP-3",
-      "evidence": { "window": ["2026-05-27", "2026-07-31"] }
+      "evidence": {
+        "window": ["2026-05-27", "2026-07-31"],
+        "source_document": "SALARY_SLIP-3",
+        "source_value": "₹85,000 for Jun 2026",
+        "target_document": "BANK_STATEMENT",
+        "target_value": null,
+        "message": "No credit of about ₹85,000 was found on the Bank Statement between 27 May 2026 and 31 Jul 2026."
+      }
     }
   ]
 }
 ```
+
+#### `evidence` keys
+
+Every result's `evidence` carries these five keys, so a client can render any check without knowing its type. Check-specific keys (`window`, `matched_transaction`, `month`, `stmt_duration`, …) sit alongside them.
+
+| Key | Meaning |
+|---|---|
+| `source_document` | Document id the checked value came from (e.g. `PAN`, `SALARY_SLIP-0`). `null` when nothing was compared. |
+| `source_value` | That value, as display text. |
+| `target_document` | Document id it was compared against. `SALARY_SLIPS` means "all submitted salary slips". |
+| `target_value` | The value it was compared against, or `null` if none was found. |
+| `message` | One plain-English sentence explaining the outcome. |
+
+Document ids are raw identifiers; the frontend maps them to labels (see `frontend/src/lib/validationLabels.ts`).
 
 | Field | Type | Description |
 |---|---|---|

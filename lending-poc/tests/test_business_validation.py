@@ -296,3 +296,50 @@ def test_statement_with_no_transactions_produces_no_results():
     results = run_business_validation(_case([_slip("SLIP-JAN", date(2026, 1, 1))], []))
 
     assert _missing(results) == []
+
+
+def test_matched_slip_evidence_describes_slip_and_credit():
+    """Every result carries source/target documents, values and a message
+    so the UI can explain it without knowing the check type."""
+    case = _case([_slip("SALARY_SLIP-0", date(2026, 3, 1))], [_txn(date(2026, 4, 1))])
+
+    results = run_business_validation(case)
+
+    salary = _salary_date(results, "SALARY_SLIP-0")
+    assert salary.evidence["source_document"] == "SALARY_SLIP-0"
+    assert salary.evidence["source_value"] == "₹50,000 for Mar 2026"
+    assert salary.evidence["target_document"] == "BANK_STATEMENT"
+    assert salary.evidence["target_value"] == "₹50,000 on 01 Apr 2026"
+    assert salary.evidence["message"] == "Salary for Mar 2026 was credited on 01 Apr 2026 (₹50,000)."
+
+    employer = next(r for r in results if r.check_type == CheckType.EMPLOYER)
+    assert employer.evidence["source_value"] == EMPLOYER
+    assert employer.evidence["target_value"] == "NEFT ACME CORP SALARY"
+
+
+def test_unmatched_slip_evidence_names_the_search_window():
+    case = _case([_slip("SALARY_SLIP-0", date(2026, 3, 1))], [_txn(date(2026, 3, 5), amount=1.0)])
+
+    salary = _salary_date(run_business_validation(case), "SALARY_SLIP-0")
+
+    assert salary.evidence["target_value"] is None
+    assert salary.evidence["message"] == (
+        "No credit of about ₹50,000 was found on the Bank Statement "
+        "between 24 Feb 2026 and 30 Apr 2026."
+    )
+
+
+def test_every_business_result_has_a_message():
+    """Covers SALARY_CREDIT_COUNT and SALARY_CONTINUITY too, which have no slip."""
+    case = _case(
+        [_slip("SALARY_SLIP-0", date(2026, 1, 1))],
+        [_txn(date(2026, 1, 15)), _txn(date(2026, 3, 31))],
+    )
+
+    results = run_business_validation(case)
+
+    assert all(r.evidence and r.evidence["message"] for r in results)
+    missing = _missing(results)[0]
+    assert missing.evidence["message"] == (
+        "The Bank Statement covers Feb 2026, but no salary slip was submitted for that month."
+    )

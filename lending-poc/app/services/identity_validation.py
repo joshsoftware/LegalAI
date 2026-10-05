@@ -30,12 +30,21 @@ document is never compared against a value it supplied itself, tracked via
 from app.matching import exact, fuzzy
 from app.services import validation_config as cfg
 from app.services.dto import CaseInput, CheckType, GoldenRecord, ValidationResult
+from app.services.evidence_format import comparison_evidence, doc_label, format_date
 
 MANDATORY_GOLDEN_FIELDS = {
     CheckType.NAME: "name",
     CheckType.AADHAAR: "aadhaar_number",
     CheckType.PAN: "pan_number",
     CheckType.DOB: "date_of_birth",
+}
+
+# How each mandatory field is named in a user-facing sentence.
+_FIELD_DISPLAY_NAMES = {
+    CheckType.NAME: "name",
+    CheckType.AADHAAR: "Aadhaar number",
+    CheckType.PAN: "PAN number",
+    CheckType.DOB: "date of birth",
 }
 
 
@@ -51,12 +60,23 @@ def check_mandatory_presence(golden: GoldenRecord) -> list[ValidationResult]:
                     passed=False,
                     score=0.0,
                     failure_reason="missing_in_golden_record",
+                    # Nothing was compared -- the value is absent everywhere --
+                    # so there is no source or target to show, only the message.
+                    evidence=comparison_evidence(
+                        None,
+                        None,
+                        None,
+                        None,
+                        f"No {_FIELD_DISPLAY_NAMES[check_type]} was found on any document.",
+                    ),
                 )
             )
     return results
 
 
-def _exact_result_to_validation(check_type: CheckType, outcome, document_id: str) -> ValidationResult:
+def _exact_result_to_validation(
+    check_type: CheckType, outcome, document_id: str, evidence: dict | None = None
+) -> ValidationResult:
     passed = outcome.result == exact.MatchResult.MATCH
     score = 100.0 if passed else (50.0 if outcome.result == exact.MatchResult.INCONCLUSIVE else 0.0)
     return ValidationResult(
@@ -65,7 +85,25 @@ def _exact_result_to_validation(check_type: CheckType, outcome, document_id: str
         score=score,
         document_id=document_id,
         failure_reason=None if passed else outcome.reason,
+        evidence=evidence,
     )
+
+
+def _name_message(source: str, target: str, score: float, passed: bool) -> str:
+    """Describe a name comparison, e.g. "PAN name exactly matches Aadhaar name."."""
+    if score >= 100.0:
+        return f"{source} name exactly matches {target} name."
+    verb = "closely matches" if passed else "does not match"
+    return f"{source} name {verb} {target} name (similarity {score:.0f}%)."
+
+
+def _dob_message(source: str, target: str, result: exact.MatchResult) -> str:
+    """Describe a DOB comparison from its exact-match outcome."""
+    if result == exact.MatchResult.MATCH:
+        return f"{source} date of birth matches {target} date of birth."
+    if result == exact.MatchResult.MISMATCH:
+        return f"{source} date of birth differs from {target} date of birth."
+    return f"{source} date of birth could not be compared with {target} (a date is missing)."
 
 
 def validate_document_against_golden(
@@ -107,12 +145,31 @@ def validate_document_against_golden(
                 score=score,
                 document_id=document_id,
                 failure_reason=None if passed else "name_below_threshold",
+                # The target is the document the Golden Record name was taken
+                # from, so the UI can say "PAN name matches Aadhaar name"
+                # rather than the abstract "matches the Golden Record".
+                evidence=comparison_evidence(
+                    document_id,
+                    doc_name,
+                    golden.name_source,
+                    golden.name,
+                    _name_message(
+                        doc_label(document_id), doc_label(golden.name_source), score, passed
+                    ),
+                ),
             )
         )
 
     if doc_dob is not None and document_id != golden.dob_source:
         outcome = exact.dob_match(golden.date_of_birth, doc_dob)
-        results.append(_exact_result_to_validation(CheckType.DOB, outcome, document_id))
+        evidence = comparison_evidence(
+            document_id,
+            format_date(doc_dob),
+            golden.dob_source,
+            format_date(golden.date_of_birth),
+            _dob_message(doc_label(document_id), doc_label(golden.dob_source), outcome.result),
+        )
+        results.append(_exact_result_to_validation(CheckType.DOB, outcome, document_id, evidence))
 
     return results
 

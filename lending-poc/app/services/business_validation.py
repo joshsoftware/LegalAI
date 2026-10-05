@@ -22,6 +22,14 @@ from app.services.dto import (
     SalarySlipDoc,
     ValidationResult,
 )
+from app.services.evidence_format import (
+    ALL_SALARY_SLIPS,
+    comparison_evidence,
+    doc_label,
+    format_date,
+    format_inr,
+    format_month,
+)
 
 
 def _add_months(d: date, months: int) -> date:
@@ -196,6 +204,22 @@ def _select_best_transaction(
     return best_txn, best_score
 
 
+def _slip_summary(slip: SalarySlipDoc) -> str | None:
+    """Describe what a slip declares, e.g. "₹85,000 for Mar 2026".
+
+    Args:
+        slip (SalarySlipDoc): The slip to describe.
+
+    Returns:
+        str or None: Whichever of amount and month the slip carries, or
+            None when it carries neither.
+    """
+    amount, month = format_inr(slip.net_salary), format_month(slip.salary_month)
+    if amount and month:
+        return f"{amount} for {month}"
+    return amount or (f"Salary for {month}" if month else None)
+
+
 def _validate_salary_slip(
     slip: SalarySlipDoc, bank_statement: BankStatementDoc, used_transaction_ids: set[int]
 ) -> ValidationResult:
@@ -224,6 +248,14 @@ def _validate_salary_slip(
             score=0.0,
             document_id=slip.doc_id,
             failure_reason="missing_salary_month",
+            evidence=comparison_evidence(
+                slip.doc_id,
+                _slip_summary(slip),
+                bank_statement.doc_id,
+                None,
+                f"{doc_label(slip.doc_id)} has no salary month, so its credit could "
+                f"not be looked for on the {doc_label(bank_statement.doc_id)}.",
+            ),
         )
 
     if slip.net_salary is None:
@@ -233,6 +265,14 @@ def _validate_salary_slip(
             score=0.0,
             document_id=slip.doc_id,
             failure_reason="missing_net_salary",
+            evidence=comparison_evidence(
+                slip.doc_id,
+                _slip_summary(slip),
+                bank_statement.doc_id,
+                None,
+                f"{doc_label(slip.doc_id)} has no net salary amount, so its credit could "
+                f"not be looked for on the {doc_label(bank_statement.doc_id)}.",
+            ),
         )
 
     window = _month_window(slip.salary_month)
@@ -254,7 +294,18 @@ def _validate_salary_slip(
             score=0.0,
             document_id=slip.doc_id,
             failure_reason="no_matching_credit_in_window",
-            evidence={"window": window},
+            evidence={
+                "window": window,
+                **comparison_evidence(
+                    slip.doc_id,
+                    _slip_summary(slip),
+                    bank_statement.doc_id,
+                    None,
+                    f"No credit of about {format_inr(slip.net_salary)} was found on the "
+                    f"{doc_label(bank_statement.doc_id)} between {format_date(window[0])} "
+                    f"and {format_date(window[1])}.",
+                ),
+            },
         )
 
     txn, score = selection
@@ -264,12 +315,22 @@ def _validate_salary_slip(
         passed=True,
         score=score,
         document_id=slip.doc_id,
-        evidence={"matched_transaction": txn},
+        evidence={
+            "matched_transaction": txn,
+            **comparison_evidence(
+                slip.doc_id,
+                _slip_summary(slip),
+                bank_statement.doc_id,
+                f"{format_inr(txn.amount)} on {format_date(txn.txn_date)}",
+                f"Salary for {format_month(slip.salary_month)} was credited on "
+                f"{format_date(txn.txn_date)} ({format_inr(txn.amount)}).",
+            ),
+        },
     )
 
 
 def _employer_match_for_slip(
-    slip: SalarySlipDoc, slip_result: ValidationResult
+    slip: SalarySlipDoc, slip_result: ValidationResult, bank_statement: BankStatementDoc
 ) -> ValidationResult:
     """Check a slip's employer against the narration of its own matched credit.
 
@@ -280,6 +341,7 @@ def _employer_match_for_slip(
         slip (SalarySlipDoc): The slip whose employer to verify.
         slip_result (ValidationResult): That slip's SALARY_DATE result from
             _validate_salary_slip.
+        bank_statement (BankStatementDoc): The statement the credit came from.
 
     Returns:
         ValidationResult: An EMPLOYER result scored by employer similarity.
@@ -293,6 +355,13 @@ def _employer_match_for_slip(
             score=0.0,
             document_id=slip.doc_id,
             failure_reason="missing_employer_name",
+            evidence=comparison_evidence(
+                slip.doc_id,
+                None,
+                bank_statement.doc_id,
+                None,
+                f"{doc_label(slip.doc_id)} has no employer name to verify.",
+            ),
         )
 
     if not slip_result.passed or not slip_result.evidence:
@@ -302,17 +371,34 @@ def _employer_match_for_slip(
             score=0.0,
             document_id=slip.doc_id,
             failure_reason="no_matching_credit_to_verify_employer_against",
+            evidence=comparison_evidence(
+                slip.doc_id,
+                slip.employer_name,
+                bank_statement.doc_id,
+                None,
+                f"Employer could not be verified: no salary credit for "
+                f"{doc_label(slip.doc_id)} was found on the {doc_label(bank_statement.doc_id)}.",
+            ),
         )
 
     matched_txn = slip_result.evidence.get("matched_transaction")
     score = employer_similarity(slip.employer_name, matched_txn.narration)
     passed = score >= cfg.EMPLOYER_MATCH_THRESHOLD
+    verb = "matches" if passed else "does not match"
     return ValidationResult(
         check_type=CheckType.EMPLOYER,
         passed=passed,
         score=score,
         document_id=slip.doc_id,
         failure_reason=None if passed else "employer_narration_mismatch",
+        evidence=comparison_evidence(
+            slip.doc_id,
+            slip.employer_name,
+            bank_statement.doc_id,
+            matched_txn.narration,
+            f"Employer on {doc_label(slip.doc_id)} {verb} the salary credit's "
+            f"bank narration (similarity {score:.0f}%).",
+        ),
     )
 
 
@@ -348,6 +434,14 @@ def _salary_credit_count(
             "no_of_matches": matched_slips,
             "total_slips": total_slips,
             "confidence_score": confidence_score,
+            **comparison_evidence(
+                ALL_SALARY_SLIPS,
+                f"{total_slips} slip(s)",
+                bank_statement.doc_id,
+                f"{matched_slips} matching credit(s)",
+                f"{matched_slips} of {total_slips} salary slip(s) have a matching credit "
+                f"on the {doc_label(bank_statement.doc_id)}.",
+            ),
         },
     )
 
@@ -410,7 +504,17 @@ def _missing_slip_checks(
             score=0.0,
             document_id=None,  # no slip exists to attribute this to -- that IS the finding
             failure_reason="no_salary_slip_for_month",
-            evidence={"month": month},
+            evidence={
+                "month": month,
+                **comparison_evidence(
+                    bank_statement.doc_id,
+                    format_month(month),
+                    ALL_SALARY_SLIPS,
+                    None,
+                    f"The {doc_label(bank_statement.doc_id)} covers {format_month(month)}, "
+                    f"but no salary slip was submitted for that month.",
+                ),
+            },
         )
         for month in months_needing_a_slip
         if month not in covered
@@ -451,7 +555,11 @@ def run_business_validation(case: CaseInput) -> list[ValidationResult]:
     results.extend(slip_results)
 
     for slip in case.salary_slips:
-        results.append(_employer_match_for_slip(slip, slip_results_by_doc_id[slip.doc_id]))
+        results.append(
+            _employer_match_for_slip(
+                slip, slip_results_by_doc_id[slip.doc_id], case.bank_statement
+            )
+        )
 
     results.append(_salary_credit_count(case.salary_slips, case.bank_statement, slip_results))
 

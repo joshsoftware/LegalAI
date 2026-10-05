@@ -152,3 +152,42 @@ def test_golden_record_falls_back_to_pan_dob():
 
     assert golden.date_of_birth == date(1994, 3, 19)
     assert golden.dob_source == "PAN"
+
+
+def test_name_evidence_names_both_documents_and_values():
+    """The UI shows source/target documents and values, so the evidence must
+    say which document was compared against which -- not just a score."""
+    case = _case(date(1994, 8, 19), date(1994, 8, 19))
+    golden = build_golden_record(case)
+
+    name = next(
+        r for r in run_identity_validation(case, golden) if r.check_type == CheckType.NAME
+    )
+
+    assert name.evidence["source_document"] == "PAN"
+    assert name.evidence["source_value"] == "Arjun Ramesh Iyer"
+    assert name.evidence["target_document"] == "AADHAAR"
+    assert name.evidence["target_value"] == "Arjun Ramesh Iyer"
+    assert name.evidence["message"] == "PAN name exactly matches Aadhaar name."
+
+
+def test_dob_mismatch_evidence_shows_both_dates():
+    results = _dob_results(_case(date(1994, 8, 19), date(1994, 3, 19)))
+
+    evidence = results[0].evidence
+    assert evidence["source_value"] == "19 Mar 1994"
+    assert evidence["target_value"] == "19 Aug 1994"
+    assert evidence["message"] == "PAN date of birth differs from Aadhaar date of birth."
+
+
+def test_missing_field_evidence_has_a_message_but_no_documents():
+    case = _case(date(1994, 8, 19), date(1994, 8, 19))
+    case.pan.pan_number = None
+    golden = build_golden_record(case)
+
+    pan_result = next(
+        r for r in run_identity_validation(case, golden) if r.check_type == CheckType.PAN
+    )
+
+    assert pan_result.evidence["source_document"] is None
+    assert pan_result.evidence["message"] == "No PAN number was found on any document."
