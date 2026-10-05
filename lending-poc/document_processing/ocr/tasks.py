@@ -44,16 +44,11 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
 )
 
-# Heartbeat api.py's /health reads to report on OCR readiness, since the API
-# process no longer owns the Surya engine itself. The worker rewrites it
-# every HEARTBEAT_INTERVAL_SECONDS; if it stops (worker stopped or crashed),
-# the key expires and /health reports "unreachable".
+
 WORKER_STATUS_KEY = "ocr:worker_status"
 HEARTBEAT_INTERVAL_SECONDS = 10
 HEARTBEAT_TTL_SECONDS = 30
 
-# Cheap to construct: the Surya engine starts lazily (see _warm_up below), so
-# importing this module from api.py never spins up any inference.
 extractor = Extractor(engine=DEFAULT_ENGINE)
 
 # The Surya engine crashes (segfault) if used from more than one thread at
@@ -79,8 +74,7 @@ def _warm_up() -> None:
         with _engine_lock:
             extractor.engine.warm_up()
     except Exception as exc:
-        # Kept visible through /health (and api.py refuses new uploads)
-        # rather than crashing the worker, matching the old API behaviour.
+        
         _status.update(status="unhealthy", error=str(exc))
     else:
         _status.update(status="healthy", error=None)
@@ -95,13 +89,7 @@ def _start_background_threads(**_kwargs: Any) -> None:
     threading.Thread(target=_warm_up, name="ocr-warm-up", daemon=True).start()
 
 
-# time_limit is a hard limit: if the task is still running this many seconds
-# after the worker started it, Celery kills the worker process (nothing in
-# the task gets to run, not even the `finally` below) and starts a fresh one,
-# which warms up again. A soft limit isn't used: a blocked Surya call can't
-# be interrupted, so it never got the chance to act. Killing the worker
-# doesn't cancel pages already sent to surya-inference: it finishes them
-# anyway, so the next few jobs run slower until it catches up.
+
 @celery_app.task(name="ocr.extract", time_limit=OCR_TASK_TIME_LIMIT_SECONDS)
 def extract_task(file_path: str, filename: str, file_extension: str) -> Dict[str, Any]:
     """Run OCR on a file api.py saved to disk, then delete the file.

@@ -122,9 +122,14 @@ single `backend` container (see below).
 `backend` (and its GPU twin `backend-gpu`) runs eight independent
 processes rather than one — `scripts/start-combined.sh` starts five APIs,
 each with its own `uvicorn` command on its own port, plus three Celery
-workers:
+workers.
 
-| Process | Port | Role |
+The ports below are **container-internal** — where each process listens
+inside the container. Only the gateway's `8080` is published to the host
+(see `ports:` in `docker-compose.yml`); the rest are reachable only from
+inside the container, e.g. via `docker compose exec backend curl ...`.
+
+| Process | Internal port | Role |
 |---|---|---|
 | `app` | 8000 | Case submission and decisioning (`/cases`) |
 | `translation` | 8001 | OCR-text translation (queues `/translate/text` jobs) |
