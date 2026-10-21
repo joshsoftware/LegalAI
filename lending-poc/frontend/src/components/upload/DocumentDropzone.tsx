@@ -1,6 +1,6 @@
 import { useCallback, useId, useRef, useState, type DragEvent } from 'react'
 import { cn } from '@/lib/utils'
-import { ACCEPTED_FILE_EXTENSIONS } from '@/lib/documentTypes'
+import { ACCEPTED_FILE_EXTENSIONS, MAX_FILE_SIZE_MB } from '@/lib/documentTypes'
 
 interface DocumentDropzoneProps {
   label: string
@@ -67,7 +67,7 @@ export function DocumentDropzone({ label, onFileSelected, error }: DocumentDropz
           or <span className="font-medium text-brand-600">browse</span> to upload
         </p>
         <p className="mt-2 text-xs text-slate-400">
-          Accepted: {ACCEPTED_FILE_EXTENSIONS.join(', ')} — up to 50MB
+          Accepted: {ACCEPTED_FILE_EXTENSIONS.join(', ')} — up to {MAX_FILE_SIZE_MB}MB
         </p>
       </div>
       <input

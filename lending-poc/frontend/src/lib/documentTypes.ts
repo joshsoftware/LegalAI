@@ -1,4 +1,5 @@
 import type { DocType } from '@/store/useAppStore'
+import { env } from '@/config/env'
 
 export interface DocTypeConfig {
   docType: DocType
@@ -15,7 +16,8 @@ export const DOCUMENT_TYPE_CONFIG: DocTypeConfig[] = [
 
 export const ACCEPTED_FILE_TYPES = ['application/pdf', 'image/png', 'image/jpeg']
 export const ACCEPTED_FILE_EXTENSIONS = ['.pdf', '.png', '.jpg', '.jpeg']
-export const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024 // 50MB, matches backend MAX_FILE_SIZE
+export const MAX_FILE_SIZE_MB = env.VITE_MAX_UPLOAD_FILE_SIZE_MB // matches backend MAX_UPLOAD_FILE_SIZE_MB
+export const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 
 export function isAcceptedFileType(file: File): boolean {
   const name = file.name.toLowerCase()
